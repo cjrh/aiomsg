@@ -84,7 +84,7 @@ are:
 
 - Pub-sub: each connection gets a copy
 - Round-robin: each connection gets a *unique* message; the messages
-are distributed to each connection in a circular pattern.
+  are distributed to each connection in a circular pattern.
 - By name: you can also send to a specific connection by using
-its identity (this is how to emulate the *DEALER-ROUTER* socket
-pair in ZeroMQ).
+  its identity (this is how to emulate the *DEALER-ROUTER* socket
+  pair in ZeroMQ).
