@@ -18,6 +18,10 @@ Broadly 2 kinds of health/heartbeat patterns:
 - for duplex: connector sends a ping, binder sends pong. Connector must
   reconnect on a pong timeout
 
+Run tests with watchmedo:
+
+watchmedo shell-command -W -D -R -c 'clear && py.test -s --durations=10 -vv' -p '*.py'
+
 """
 import logging
 import asyncio
@@ -26,7 +30,7 @@ from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import deque
 from itertools import cycle
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Tuple
 import weakref
 
 from . import msgproto
@@ -48,10 +52,14 @@ class SocketType(Enum):
 
 
 class SmartSocket:
-    def __init__(self, send_mode: SendMode = SendMode.PUBLISH, loop=None):
+    def __init__(self,
+                 send_mode: SendMode = SendMode.PUBLISH,
+                 identity: Optional[str] = None,
+                 loop=None):
         loop = loop or asyncio.get_event_loop()
         self.loop = loop
         self.send_mode = send_mode
+        self.identity = identity or str(uuid.uuid4())
         self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
         # self._queue_send = asyncio.Queue(maxsize=65536, loop=self.loop)
         self._connections: Dict[str, Connection] = dict()
@@ -74,16 +82,24 @@ class SmartSocket:
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
         """Each new connection will create a task with this coroutine."""
         logger.debug('Creating new connection')
+
+        # Swap identities
+        await msgproto.send_msg(writer, self.identity.encode())
+        identity = await msgproto.read_msg(reader)  # This could time out.
+
+        # Create the connection object
         connection = Connection(
-            identity=str(uuid.uuid4()),  # The identity should come from the client!
+            identity=identity.decode(),  # The identity should come from the client!
             reader=reader,
             writer=writer,
             recv_queue=self._queue_recv
         )
         self._connections[connection.identity] = connection
+        # TODO: move this cycle updating into the dict update above
+        # (e.g. customize with UserDict)
         self.connection_cycle = cycle(self._connections)
         task: asyncio.Task = self.loop.create_task(connection.run())
-        task.connection = connection  # Used in the callback
+        task.connection = connection  # Used in the callback below
 
         def callback(t):
             logger.debug('connection closed')
@@ -94,11 +110,21 @@ class SmartSocket:
         task.add_done_callback(callback)
         return task
 
-    async def recv(self) -> bytes:
+    async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
-        message = await self._queue_recv.get()
-        logger.debug(f'Received message: {message}')
+        identity, message = await self._queue_recv.get()
+        logger.debug(f'Received message from {identity}: {message}')
+        return identity, message
+
+    async def recv(self) -> bytes:
+        """Just drop the identity"""
+        _, message = await self.recv_identity()
         return message
+
+    async def send_identity(self, identity: str, data: bytes):
+        logger.debug(f'Adding message to user queue: {data[:20]}')
+        # TODO: make this work below
+        self._user_send_queue.put_nowait((identity.encode(), data))
 
     async def send(self, data: bytes):
         logger.debug(f'Adding message to user queue: {data[:20]}')
@@ -202,7 +228,7 @@ class Connection:
                 return
 
             try:
-                self.reader_queue.put_nowait(message)
+                self.reader_queue.put_nowait((self.identity, message))
             except asyncio.QueueFull:
                 logger.error(
                     'Data lost on connection blah because the recv '
