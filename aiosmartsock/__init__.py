@@ -26,11 +26,12 @@ watchmedo shell-command -W -D -R -c 'clear && py.test -s --durations=10 -vv' -p 
 import logging
 import asyncio
 import uuid
+import json
 from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import deque, UserDict
 from itertools import cycle
-from typing import Dict, Set, Optional, Tuple
+from typing import Dict, Set, Optional, Tuple, Union, List
 import weakref
 
 from . import msgproto
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 slogger = logging.getLogger(__name__ + '.server')
 clogger = logging.getLogger(__name__ + '.client')
 SEND_MODES = ['round_robin', 'publish']
+JSONCompatible = Union[str, int, float, bool, List, Dict, None]
 
 
 class SendMode(Enum):
@@ -88,6 +90,7 @@ class SmartSocket:
         self.server = None
         self.send_mode = send_mode
         self.socket_type: Optional[SocketType] = None
+        self.closed = False
 
         logger.debug('Starting the sender task.')
         self.sender_task = self.loop.create_task(self._sender_main())
@@ -103,8 +106,10 @@ class SmartSocket:
         logger.debug('Creating new connection')
 
         # Swap identities
+        logger.debug(f'Sending my identity {self.identity}')
         await msgproto.send_msg(writer, self.identity.encode())
         identity = await msgproto.read_msg(reader)  # This could time out.
+        logger.debug(f'Received identity {identity}')
 
         # Create the connection object
         connection = Connection(
@@ -128,6 +133,7 @@ class SmartSocket:
         return task
 
     async def _close(self):
+        self.closed = True
         if self.server:
             # Stop new connections from being accepted.
             self.server.close()
@@ -144,7 +150,6 @@ class SmartSocket:
         except asyncio.TimeoutError:
             logger.exception('Timed out during close:')
 
-
     async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
         identity, message = await self._queue_recv.get()
@@ -156,14 +161,27 @@ class SmartSocket:
         _, message = await self.recv_identity()
         return message
 
+    async def recv_string(self) -> str:
+        return (await self.recv()).decode()
+
+    async def recv_json(self) -> JSONCompatible:
+        data = await self.recv_string()
+        return json.loads(data)
+
     async def send_identity(self, identity: str, data: bytes):
         logger.debug(f'Adding message to user queue: {data[:20]}')
         # TODO: make this work below
-        self._user_send_queue.put_nowait((identity.encode(), data))
+        await self._user_send_queue.put((identity.encode(), data))
 
     async def send(self, data: bytes):
         logger.debug(f'Adding message to user queue: {data[:20]}')
-        self._user_send_queue.put_nowait(data)
+        await self._user_send_queue.put(data)
+
+    async def send_string(self, data: str):
+        await self.send(data.encode())
+
+    async def send_json(self, obj: JSONCompatible):
+        await self.send_string(json.dumps(obj))
 
     async def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
@@ -246,14 +264,18 @@ class SmartSocket:
 
         async def connect_with_retry():
             logger.info(f'Connecting to {hostname}:{port}')
-            while True:
+            while not self.closed:
                 try:
                     reader, writer = await asyncio.open_connection(
                         hostname, port, loop=self.loop)
                 except ConnectionError:
-                    logger.debug('Connection error, reconnecting...')
-                    await asyncio.sleep(0.1)
-                    continue
+                    if self.closed:
+                        break
+                    else:
+                        logger.debug('Connection error, reconnecting...')
+                        await asyncio.sleep(0.1)
+                        continue
+
                 logger.info('Connected.')
                 task = await self._connection(reader, writer)
                 await task

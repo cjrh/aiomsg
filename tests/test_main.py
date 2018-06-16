@@ -119,3 +119,68 @@ def test_fixes(bind_sock, conn_sock):
         assert out == value
 
     loop.run_until_complete(test())
+
+
+def test_many_connect():
+    """One server, one client, echo server"""
+
+    received = []
+    port = portpicker.pick_unused_port()
+    port = 25000
+
+    async def srv():
+        server = SmartSocket()
+        await server.bind('127.0.0.1', port)
+        try:
+            while True:
+                msg = await server.recv_string()
+                await server.send_string(msg.capitalize())
+        except asyncio.CancelledError:
+            await server.close()
+
+    server_task = loop.create_task(srv())
+
+    async def inner():
+
+        rec_future = asyncio.Future()
+        await asyncio.sleep(0.1)
+
+        clients = []
+
+        async def cnt():
+            client = SmartSocket()
+            clients.append(client)
+            await client.connect('127.0.0.1', port)
+
+        # Connect the clients
+        for i in range(3):
+            loop.create_task(cnt())
+
+        await asyncio.sleep(0.1)
+
+        async def listen(client):
+            message = await client.recv_string()
+            print(f'Client received: {message}')
+            received.append(message)
+            if len(received) == 3:
+                rec_future.set_result(1)
+
+        for c in clients:
+            loop.create_task(listen(c))
+
+        await asyncio.sleep(0.1)
+
+        print('Sending string from client')
+        await clients[0].send_string('blah')
+        await asyncio.sleep(1.0)
+
+        await rec_future  # Wait for the reply
+        [await c.close() for c in clients]
+        server_task.cancel()
+        await server_task
+
+    loop.run_until_complete(asyncio.wait_for(inner(), 10))
+    assert received
+    assert len(received) == 3
+    assert received[0] == 'Blah'
+    print(received)
