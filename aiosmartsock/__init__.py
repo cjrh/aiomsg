@@ -199,18 +199,31 @@ class SmartSocket:
     async def _sender_main(self):
         backlog = asyncio.Queue()
         while True:
-            data = await self._user_send_queue.get()
-            logger.debug(f'Got data to send: {data}')
-
             if not self._connections:
-                logger.debug(f'Putting data onto backlog')
-                await backlog.put(data)
+                await asyncio.sleep(0.1)
                 continue
 
             while not backlog.empty():
                 logger.debug('Sending from the backlog')
                 backlog_data = backlog.get_nowait()
                 await self.sender_handler(backlog_data)
+
+            try:
+                data = await asyncio.wait_for(
+                    self._user_send_queue.get(),
+                    10
+                )
+            except asyncio.TimeoutError:
+                # Go check for new connections again
+                continue
+            logger.debug(f'Got data to send: {data}')
+
+            # Have to check here, because there could be a delay
+            # between receiving a message off the queue.
+            if not self._connections:
+                logger.debug(f'Putting data onto backlog')
+                await backlog.put(data)
+                continue
 
             logger.debug('Sending the message.')
             await self.sender_handler(message=data)
@@ -232,10 +245,15 @@ class SmartSocket:
         self.check_socket_type()
 
         async def connect_with_retry():
+            logger.info(f'Connecting to {hostname}:{port}')
             while True:
-                logger.info(f'Connecting to {hostname}:{port}')
-                reader, writer = await asyncio.open_connection(
-                    hostname, port, loop=self.loop)
+                try:
+                    reader, writer = await asyncio.open_connection(
+                        hostname, port, loop=self.loop)
+                except ConnectionError:
+                    logger.debug('Connection error, reconnecting...')
+                    await asyncio.sleep(0.1)
+                    continue
                 logger.info('Connected.')
                 task = await self._connection(reader, writer)
                 await task
