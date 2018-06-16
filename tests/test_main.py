@@ -112,6 +112,10 @@ def conn_sock():
 
 def test_fixes(bind_sock, conn_sock):
     value = b'hello'
-    loop.run_until_complete(bind_sock.send(value))
-    out = loop.run_until_complete(conn_sock.recv())
-    assert out == value
+
+    async def test():
+        await bind_sock.send(value)
+        out = await conn_sock.recv()
+        assert out == value
+
+    loop.run_until_complete(test())
