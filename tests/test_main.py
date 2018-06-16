@@ -24,6 +24,7 @@ def test_hello():
         await client.connect('127.0.0.1', 25000)
 
         fut = asyncio.Future()
+
         async def client_recv():
             message = await client.recv()
             print(f'Client received: {message}')
@@ -35,6 +36,8 @@ def test_hello():
         await asyncio.sleep(0.1)
         await client.send(b'blah')
         await fut
+        await server.close()
+        await client.close()
 
     loop.run_until_complete(inner())
     assert received
@@ -48,6 +51,7 @@ def test_hello_client_before_server():
     loop = asyncio.get_event_loop()
     received = []
     port = portpicker.pick_unused_port()
+    port = 25000
 
     async def inner():
         server = SmartSocket()

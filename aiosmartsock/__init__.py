@@ -28,7 +28,7 @@ import asyncio
 import uuid
 from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
-from collections import deque
+from collections import deque, UserDict
 from itertools import cycle
 from typing import Dict, Set, Optional, Tuple
 import weakref
@@ -51,6 +51,26 @@ class SocketType(Enum):
     CONNECTOR = auto()
 
 
+class ConnectionsDict(UserDict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.update_cycle()
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.update_cycle()
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.update_cycle()
+
+    def update_cycle(self):
+        self.cycle = cycle(self.data)
+
+    def __next__(self):
+        return next(self.cycle)
+
+
 class SmartSocket:
     def __init__(self,
                  send_mode: SendMode = SendMode.PUBLISH,
@@ -62,8 +82,7 @@ class SmartSocket:
         self.identity = identity or str(uuid.uuid4())
         self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
         # self._queue_send = asyncio.Queue(maxsize=65536, loop=self.loop)
-        self._connections: Dict[str, Connection] = dict()
-        self.connection_cycle = cycle(self._connections)
+        self._connections: Dict[str, Connection] = ConnectionsDict()
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
@@ -97,7 +116,6 @@ class SmartSocket:
         self._connections[connection.identity] = connection
         # TODO: move this cycle updating into the dict update above
         # (e.g. customize with UserDict)
-        self.connection_cycle = cycle(self._connections)
         task: asyncio.Task = self.loop.create_task(connection.run())
         task.connection = connection  # Used in the callback below
 
@@ -105,10 +123,27 @@ class SmartSocket:
             logger.debug('connection closed')
             if t.connection.identity in self._connections:
                 del self._connections[t.connection.identity]
-            self.connection_cycle = cycle(self._connections)
 
         task.add_done_callback(callback)
         return task
+
+    async def _close(self):
+        if self.server:
+            # Stop new connections from being accepted.
+            self.server.close()
+            await self.server.wait_closed()
+
+        results = asyncio.gather(
+            *(c.close() for c in self._connections.values()),
+            return_exceptions=True
+        )
+
+    async def close(self, timeout=10):
+        try:
+            await asyncio.wait_for(self._close(), timeout)
+        except asyncio.TimeoutError:
+            logger.exception('Timed out during close:')
+
 
     async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
@@ -149,7 +184,7 @@ class SmartSocket:
         while not sent:
             # TODO: this can raise StopIteration if the iterator is empty
             # TODO: in that case we should add data to the backlog
-            connection = next(self.connection_cycle)
+            connection = next(self._connections)
             logger.debug(f'Got connection: {connection}')
             try:
                 connection.writer_queue.put_nowait(message)
@@ -210,24 +245,39 @@ class SmartSocket:
 
 class Connection:
     def __init__(self, identity, reader: StreamReader, writer: StreamWriter,
-                 recv_queue: asyncio.Queue):
+                 recv_queue: asyncio.Queue, loop=None):
+        self.loop = loop or asyncio.get_event_loop()
         self.identity = identity
         self.reader = reader
         self.writer = writer
         self.writer_queue = asyncio.Queue()
         self.reader_queue = recv_queue
 
-    async def run(self):
+        self.reader_task: asyncio.Task = None
+        self.writer_task: asyncio.Task = None
 
-        async def recv():
-            message = await msgproto.read_msg(self.reader)
-            logger.debug(f'Received message on connection: {message}')
+    async def close(self):
+        # Kill the reader task
+        self.reader_task.cancel()
+        self.writer_task.cancel()
+        await asyncio.gather(self.reader_task, self.writer_task)
+        self.reader_task = None
+        self.writer_task = None
+
+    async def _recv(self):
+        while True:
+            try:
+                message = await msgproto.read_msg(self.reader)
+            except asyncio.CancelledError:
+                return
+
             if not message:
                 logger.debug('Connection closed (recv)')
                 self.writer_queue.put_nowait(None)
                 return
 
             try:
+                logger.debug(f'Received message on connection: {message}')
                 self.reader_queue.put_nowait((self.identity, message))
             except asyncio.QueueFull:
                 logger.error(
@@ -235,29 +285,36 @@ class Connection:
                     'queue is full!'
                 )
 
-        async def send():
-            message = await self.writer_queue.get()
-            logger.debug('Got message from connection writer queue.')
-            if not message:
-                logger.info('Connection closed (send)')
+    async def _send(self):
+        while True:
+            try:
+                message = await self.writer_queue.get()
+                self.writer_queue.task_done()
+            except asyncio.CancelledError:
                 return
 
-            await msgproto.send_msg(self.writer, message)
+            if not message:
+                logger.info('Connection closed (send)')
+                self.reader_task.cancel()
+                return
 
-        await asyncio.gather(recv(), send())
+            logger.debug('Got message from connection writer queue.')
+            try:
+                await msgproto.send_msg(self.writer, message)
+            except asyncio.CancelledError:
+                # Try to still send this message.
+                await msgproto.send_msg(self.writer, message)
+                self.writer.close()
+                return
 
+    async def run(self):
+        logger.info(f'Connection {self.identity} running.')
+        self.reader_task = self.loop.create_task(self._recv())
+        self.writer_task = self.loop.create_task(self._send())
 
-def run_server(client, host='127.0.0.1', port=25000):
-    loop = asyncio.get_event_loop()
-    coro = asyncio.start_server(client, '127.0.0.1', 25000)
-    server = loop.run_until_complete(coro)
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        print('Bye!')
-    server.close()
-    loop.run_until_complete(server.wait_closed())
-    group = asyncio.gather(*asyncio.Task.all_tasks())
-    group.cancel()
-    loop.run_until_complete(group)
-    loop.close()
+        done, pending = await asyncio.wait(
+            [self.reader_task, self.writer_task],
+            loop=self.loop,
+            return_when=asyncio.ALL_COMPLETED
+        )
+        logger.info(f'Connection {self.identity} no longer active.')
