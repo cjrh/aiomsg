@@ -29,10 +29,9 @@ import uuid
 import json
 from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
-from collections import deque, UserDict
+from collections import UserDict
 from itertools import cycle
-from typing import Dict, Set, Optional, Tuple, Union, List
-import weakref
+from typing import Dict, Optional, Tuple, Union, List
 
 from . import msgproto
 
@@ -76,23 +75,24 @@ class ConnectionsDict(UserDict):
 class SmartSocket:
     def __init__(self,
                  send_mode: SendMode = SendMode.PUBLISH,
+                 receiver_channel: Optional[str] = None,
                  identity: Optional[str] = None,
                  loop=None):
-        loop = loop or asyncio.get_event_loop()
-        self.loop = loop
         self.send_mode = send_mode
+        self.receiver_channel = receiver_channel
         self.identity = identity or str(uuid.uuid4())
+        self.loop = loop or asyncio.get_event_loop()
+
         self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
-        # self._queue_send = asyncio.Queue(maxsize=65536, loop=self.loop)
         self._connections: Dict[str, Connection] = ConnectionsDict()
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
-        self.send_mode = send_mode
         self.socket_type: Optional[SocketType] = None
         self.closed = False
 
         logger.debug('Starting the sender task.')
+        # Note this task is started before any connections have been made.
         self.sender_task = self.loop.create_task(self._sender_main())
         if send_mode is SendMode.PUBLISH:
             self.sender_handler = self._sender_publish
@@ -185,7 +185,6 @@ class SmartSocket:
 
     async def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
-        print('***', self._connections)
         for identity, c in self._connections.items():
             logger.debug(f'Sending to connection: {identity}')
             try:
@@ -198,13 +197,15 @@ class SmartSocket:
                 )
 
     async def _sender_robin(self, message: bytes):
+        logger.debug(f'Sending message via round_robin')
         sent = False
         while not sent:
             # TODO: this can raise StopIteration if the iterator is empty
             # TODO: in that case we should add data to the backlog
-            connection = next(self._connections)
-            logger.debug(f'Got connection: {connection}')
+            identity = next(self._connections)
+            logger.debug(f'Got connection: {identity}')
             try:
+                connection = self._connections[identity]
                 connection.writer_queue.put_nowait(message)
                 logger.debug(f'Added message to connection send queue.')
                 sent = True
@@ -253,7 +254,7 @@ class SmartSocket:
 
     async def bind(self, hostname: str = '127.0.0.1', port: int = 25000):
         self.check_socket_type()
-        logger.info('Starting the server')
+        logger.info(f'Binding socket {self.identity} to {hostname}:{port}')
         coro = asyncio.start_server(self._connection, hostname, port,
                                     loop=self.loop)
         self.server = await coro
@@ -263,7 +264,7 @@ class SmartSocket:
         self.check_socket_type()
 
         async def connect_with_retry():
-            logger.info(f'Connecting to {hostname}:{port}')
+            logger.info(f'Socket {self.identity} connecting to {hostname}:{port}')
             while not self.closed:
                 try:
                     reader, writer = await asyncio.open_connection(

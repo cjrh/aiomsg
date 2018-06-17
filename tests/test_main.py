@@ -1,19 +1,21 @@
 import asyncio
-from aiosmartsock import SmartSocket
+from aiosmartsock import SmartSocket, SendMode
 import portpicker
 import pytest
 
 
 loop = asyncio.get_event_loop()
+loop.set_debug(True)
 
 
-def test_hello():
+@pytest.mark.parametrize('send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+def test_hello(send_mode):
     """One server, one client, echo server"""
 
     received = []
 
     async def inner():
-        server = SmartSocket()
+        server = SmartSocket(send_mode=send_mode)
         await server.bind('127.0.0.1', 25000)
 
         async def server_recv():
@@ -42,7 +44,12 @@ def test_hello():
         await server.close()
         await client.close()
 
-    loop.run_until_complete(inner())
+    loop.run_until_complete(
+        asyncio.wait_for(
+            inner(),
+            timeout=2
+        )
+    )
     assert received
     assert len(received) == 1
     assert received[0] == b'blah'
@@ -179,7 +186,7 @@ def test_many_connect():
         server_task.cancel()
         await server_task
 
-    loop.run_until_complete(asyncio.wait_for(inner(), 10))
+    loop.run_until_complete(asyncio.wait_for(inner(), 2))
     assert received
     assert len(received) == 3
     assert received[0] == 'Blah'
