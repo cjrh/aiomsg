@@ -24,7 +24,7 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup(
     name='aiosmartsock',
-    version='2018.6.1',
+    version='2018.6.3',
     description='An ode to ØMQ',
     long_description=long_description,
     long_description_content_type='text/x-rst',
