@@ -1,131 +1,164 @@
 import asyncio
-from aiosmartsock import SmartSocket, SendMode
+from contextlib import contextmanager
+from aiosmartsock import SmartSocket, SendMode, SocketType
 import portpicker
 import pytest
 
 
 loop = asyncio.get_event_loop()
 loop.set_debug(True)
+create_task = loop.create_task
 
 
-@pytest.mark.parametrize('send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
-def test_hello(send_mode):
+def run(coro, timeout=1000):
+    loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+
+
+# These context managers below are not good for general-purpose asyncio
+# usage - they are intended for the tests. They make it easier to do
+# testing because they hide some of the async functionality internally.
+
+# When Python 3.7 goes final, we can use @asynccontextmanager instead.
+
+@contextmanager
+def new_sock(*args, **kwargs) -> SmartSocket:
+    sock = SmartSocket(*args, **kwargs)
+    try:
+        yield sock
+    finally:
+        run(sock.close())
+
+
+@contextmanager
+def bind_sock(host='127.0.0.1', port=25000, **kwargs) -> SmartSocket:
+    with new_sock(**kwargs) as sock:
+        run(sock.bind(host, port))
+        yield sock
+
+
+@contextmanager
+def conn_sock(host='127.0.0.1', port=25000, **kwargs) -> SmartSocket:
+    with new_sock(**kwargs) as sock:
+        run(sock.connect(host, port))
+        yield sock
+
+
+@contextmanager
+def echo_sock(socktype: SocketType = SocketType.BINDER, **kwargs) -> SmartSocket:
+    if socktype is SocketType.BINDER:
+        with bind_sock(**kwargs) as sock:
+            yield sock
+    elif socktype is SocketType.CONNECTOR:
+        with conn_sock(**kwargs) as sock:
+            yield sock
+
+
+@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+def test_hello(bind_send_mode, conn_send_mode):
     """One server, one client, echo server"""
 
     received = []
+    fut = asyncio.Future()
 
-    async def inner():
-        server = SmartSocket(send_mode=send_mode)
-        await server.bind('127.0.0.1', 25000)
-
+    with bind_sock(send_mode=bind_send_mode) as server:
         async def server_recv():
             message = await server.recv()
             print(f'Server received {message}')
             await server.send(message)
 
-        loop.create_task(server_recv())
+        create_task(server_recv())
 
-        client = SmartSocket()
-        await client.connect('127.0.0.1', 25000)
+        with conn_sock(send_mode=conn_send_mode) as client:
 
-        fut = asyncio.Future()
+            async def client_recv():
+                message = await client.recv()
+                print(f'Client received: {message}')
+                received.append(message)
+                fut.set_result(1)
 
+            create_task(client_recv())
+
+            run(client.send(b'blah'))
+            run(fut, timeout=2)
+
+    assert received
+    assert len(received) == 1
+    assert received[0] == b'blah'
+
+
+async def sock_receiver(message_type, sock: SmartSocket):
+    if message_type == 'bytes':
+        message = await sock.recv()
+    elif message_type == 'str':
+        message = await sock.recv_string()
+    elif message_type == 'json':
+        message = await sock.recv_json()
+    else:
+        raise Exception('Unknown message type')
+
+    return message
+
+
+async def sock_sender(message_type, sock: SmartSocket, data):
+    if message_type == 'bytes':
+        assert isinstance(data, bytes)
+        await sock.send(data)
+    elif message_type == 'str':
+        assert isinstance(data, str)
+        await sock.send_string(data)
+    elif message_type == 'json':
+        await sock.send_json(data)
+    else:
+        raise Exception('Unknown message type')
+
+
+@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('message_type, value', [
+    ('bytes', b'blah'),
+    ('str', 'blah'),
+    ('json', dict(a=1, b='hi', c=[1,2,3])),
+])
+def test_hello_before(bind_send_mode, conn_send_mode, message_type, value):
+    """One server, one client, echo server"""
+
+    received = []
+    fut = asyncio.Future()
+
+    with conn_sock(send_mode=conn_send_mode) as client:
         async def client_recv():
-            message = await client.recv()
+            message = await sock_receiver(message_type, client)
             print(f'Client received: {message}')
             received.append(message)
             fut.set_result(1)
+        create_task(client_recv())
 
-        loop.create_task(client_recv())
+        with bind_sock(send_mode=bind_send_mode) as server:
+            async def server_recv():
+                message = await sock_receiver(message_type, server)
+                await sock_sender(message_type, server, message)
 
-        await asyncio.sleep(0.1)
-        await client.send(b'blah')
-        await fut
-        await server.close()
-        await client.close()
+            create_task(server_recv())
 
-    loop.run_until_complete(
-        asyncio.wait_for(
-            inner(),
-            timeout=2
-        )
-    )
+            run(sock_sender(message_type, client, value))
+            run(fut, timeout=2)
+
     assert received
     assert len(received) == 1
-    assert received[0] == b'blah'
+    assert received[0] == value
 
 
-def test_hello_client_before_server():
-    """One server, one client, echo server"""
-
-    received = []
-    port = portpicker.pick_unused_port()
-    port = 25000
-
-    async def inner():
-        rec_future = asyncio.Future()
-
-        client = SmartSocket()
-        await client.connect('127.0.0.1', port)
-
-        async def client_recv():
-            message = await client.recv()
-            print(f'Client received: {message}')
-            received.append(message)
-            rec_future.set_result(1)
-
-        loop.create_task(client_recv())
-        await client.send(b'blah')
-        await asyncio.sleep(1.5)
-
-        server = SmartSocket()
-        await server.bind('127.0.0.1', port)
-
-        async def server_recv():
-            message = await server.recv()
-            print(f'Server received {message}')
-            await server.send(message)
-
-        loop.create_task(server_recv())
-        await rec_future  # Wait for the reply
-        await client.close()
-        await server.close()
-
-    loop.run_until_complete(asyncio.wait_for(inner(), 2))
-    assert received
-    assert len(received) == 1
-    assert received[0] == b'blah'
-
-
-@pytest.fixture
-def bind_sock():
-    sock = SmartSocket()
-    try:
-        loop.run_until_complete(sock.bind('127.0.0.1', 25000))
-        yield sock
-    finally:
-        loop.run_until_complete(sock.close())
-
-
-@pytest.fixture
-def conn_sock():
-    sock = SmartSocket()
-    try:
-        loop.run_until_complete(sock.connect('127.0.0.1', 25000))
-        yield sock
-    finally:
-        loop.run_until_complete(sock.close())
-
-
-def test_fixes(bind_sock, conn_sock):
+def test_context_managers():
     value = b'hello'
 
-    async def test():
-        await bind_sock.send(value)
-        out = await conn_sock.recv()
-        assert out == value
+    with bind_sock() as bsock, conn_sock() as csock:
+        async def test():
+            await bsock.send(value)
+            out = await csock.recv()
+            assert out == value
 
-    loop.run_until_complete(test())
+        run(test(), 2)
 
 
 def test_many_connect():
