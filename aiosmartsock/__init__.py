@@ -18,7 +18,7 @@ Broadly 2 kinds of health/heartbeat patterns:
 - for duplex: connector sends a ping, binder sends pong. Connector must
   reconnect on a pong timeout
 
-Run tests with watchmedo:
+Run tests with watchmedo (available after ```pip install Watchdog``):
 
 watchmedo shell-command -W -D -R -c 'clear && py.test -s --durations=10 -vv' -p '*.py'
 
