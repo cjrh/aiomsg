@@ -90,6 +90,7 @@ class SmartSocket:
         self.server = None
         self.socket_type: Optional[SocketType] = None
         self.closed = False
+        self.at_least_one_connection = asyncio.Event(loop=self.loop)
 
         logger.debug('Starting the sender task.')
         # Note this task is started before any connections have been made.
@@ -118,6 +119,9 @@ class SmartSocket:
             writer=writer,
             recv_queue=self._queue_recv
         )
+        if not self._connections:
+            self.at_least_one_connection.set()
+
         self._connections[connection.identity] = connection
         # TODO: move this cycle updating into the dict update above
         # (e.g. customize with UserDict)
@@ -128,6 +132,9 @@ class SmartSocket:
             logger.debug('connection closed')
             if t.connection.identity in self._connections:
                 del self._connections[t.connection.identity]
+
+            if not self._connections:
+                self.at_least_one_connection.clear()
 
         task.add_done_callback(callback)
         return task
@@ -218,9 +225,8 @@ class SmartSocket:
     async def _sender_main(self):
         backlog = asyncio.Queue()
         while True:
-            if not self._connections:
-                await asyncio.sleep(0.1)
-                continue
+            logger.info('Waiting for the first connection before sending')
+            await self.at_least_one_connection.wait()
 
             while not backlog.empty():
                 logger.debug('Sending from the backlog')
