@@ -98,7 +98,7 @@ class SmartSocket:
             self.sender_handler = self._sender_publish
         elif send_mode is SendMode.ROUNDROBIN:
             self.sender_handler = self._sender_robin
-        else:
+        else:  #pragma: no cover
             raise Exception('Unknown send mode.')
 
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
