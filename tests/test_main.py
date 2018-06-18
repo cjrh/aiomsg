@@ -53,40 +53,6 @@ def echo_sock(socktype: SocketType = SocketType.BINDER, **kwargs) -> SmartSocket
             yield sock
 
 
-@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
-@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
-def test_hello(bind_send_mode, conn_send_mode):
-    """One server, one client, echo server"""
-
-    received = []
-    fut = asyncio.Future()
-
-    with bind_sock(send_mode=bind_send_mode) as server:
-        async def server_recv():
-            message = await server.recv()
-            print(f'Server received {message}')
-            await server.send(message)
-
-        create_task(server_recv())
-
-        with conn_sock(send_mode=conn_send_mode) as client:
-
-            async def client_recv():
-                message = await client.recv()
-                print(f'Client received: {message}')
-                received.append(message)
-                fut.set_result(1)
-
-            create_task(client_recv())
-
-            run(client.send(b'blah'))
-            run(fut, timeout=2)
-
-    assert received
-    assert len(received) == 1
-    assert received[0] == b'blah'
-
-
 async def sock_receiver(message_type, sock: SmartSocket):
     if message_type == 'bytes':
         message = await sock.recv()
@@ -111,6 +77,45 @@ async def sock_sender(message_type, sock: SmartSocket, data):
         await sock.send_json(data)
     else:
         raise Exception('Unknown message type')
+
+
+@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('message_type, value', [
+    ('bytes', b'blah'),
+    ('str', 'blah'),
+    ('json', dict(a=1, b='hi', c=[1,2,3])),
+])
+def test_hello(bind_send_mode, conn_send_mode, message_type, value):
+    """One server, one client, echo server"""
+
+    received = []
+    fut = asyncio.Future()
+
+    with bind_sock(send_mode=bind_send_mode) as server:
+        async def server_recv():
+            message = await sock_receiver(message_type, server)
+            print(f'Server received {message}')
+            await sock_sender(message_type, server, message)
+
+        create_task(server_recv())
+
+        with conn_sock(send_mode=conn_send_mode) as client:
+
+            async def client_recv():
+                message = await sock_receiver(message_type, client)
+                print(f'Client received: {message}')
+                received.append(message)
+                fut.set_result(1)
+
+            create_task(client_recv())
+
+            run(sock_sender(message_type, client, value))
+            run(fut, timeout=2)
+
+    assert received
+    assert len(received) == 1
+    assert received[0] == value
 
 
 @pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
