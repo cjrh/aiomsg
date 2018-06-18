@@ -99,7 +99,7 @@ class SmartSocket:
             self.sender_handler = self._sender_publish
         elif send_mode is SendMode.ROUNDROBIN:
             self.sender_handler = self._sender_robin
-        else:  #pragma: no cover
+        else:  # pragma: no cover
             raise Exception('Unknown send mode.')
 
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
@@ -190,7 +190,7 @@ class SmartSocket:
     async def send_json(self, obj: JSONCompatible):
         await self.send_string(json.dumps(obj))
 
-    async def _sender_publish(self, message: bytes):
+    def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
         for identity, c in self._connections.items():
             logger.debug(f'Sending to connection: {identity}')
@@ -203,7 +203,7 @@ class SmartSocket:
                     'queue is full.'
                 )
 
-    async def _sender_robin(self, message: bytes):
+    def _sender_robin(self, message: bytes):
         logger.debug(f'Sending message via round_robin')
         sent = False
         while not sent:
@@ -223,35 +223,16 @@ class SmartSocket:
                 )
 
     async def _sender_main(self):
-        backlog = asyncio.Queue()
         while True:
-            logger.info('Waiting for the first connection before sending')
-            await self.at_least_one_connection.wait()
-
-            while not backlog.empty():
-                logger.debug('Sending from the backlog')
-                backlog_data = backlog.get_nowait()
-                await self.sender_handler(backlog_data)
-
-            try:
-                data = await asyncio.wait_for(
-                    self._user_send_queue.get(),
-                    10
-                )
-            except asyncio.TimeoutError:
-                # Go check for new connections again
-                continue
+            q_task: asyncio.Task = self.loop.create_task(self._user_send_queue.get())
+            done, pending = await asyncio.wait(
+                [self.at_least_one_connection.wait(), q_task],
+                return_when=asyncio.ALL_COMPLETED
+            )
+            data = q_task.result()
             logger.debug(f'Got data to send: {data}')
-
-            # Have to check here, because there could be a delay
-            # between receiving a message off the queue.
-            if not self._connections:
-                logger.debug(f'Putting data onto backlog')
-                await backlog.put(data)
-                continue
-
             logger.debug('Sending the message.')
-            await self.sender_handler(message=data)
+            self.sender_handler(message=data)
 
     def check_socket_type(self):
         assert self.socket_type is None, (
