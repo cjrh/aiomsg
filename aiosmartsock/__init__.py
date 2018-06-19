@@ -187,6 +187,7 @@ class SmartSocket:
 
     def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
+        # TODO: implement grouping by named channels
         for identity, c in self._connections.items():
             logger.debug(f'Sending to connection: {identity}')
             try:
