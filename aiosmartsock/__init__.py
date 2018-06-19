@@ -164,7 +164,7 @@ class SmartSocket:
         return identity, message
 
     async def recv(self) -> bytes:
-        """Just drop the identity"""
+        # Just drop the identity
         _, message = await self.recv_identity()
         return message
 
@@ -175,20 +175,15 @@ class SmartSocket:
         data = await self.recv_string()
         return json.loads(data)
 
-    async def send_identity(self, identity: str, data: bytes):
+    async def send(self, data: bytes, identity: Optional[str] = None):
         logger.debug(f'Adding message to user queue: {data[:20]}')
-        # TODO: make this work below
-        await self._user_send_queue.put((identity.encode(), data))
+        await self._user_send_queue.put((identity, data))
 
-    async def send(self, data: bytes):
-        logger.debug(f'Adding message to user queue: {data[:20]}')
-        await self._user_send_queue.put(data)
+    async def send_string(self, data: str, identity: Optional[str] = None):
+        await self.send(data.encode(), identity)
 
-    async def send_string(self, data: str):
-        await self.send(data.encode())
-
-    async def send_json(self, obj: JSONCompatible):
-        await self.send_string(json.dumps(obj))
+    async def send_json(self, obj: JSONCompatible, identity: Optional[str] = None):
+        await self.send_string(json.dumps(obj), identity)
 
     def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
@@ -222,6 +217,23 @@ class SmartSocket:
                     'queue is full!'
                 )
 
+    def _sender_identity(self, message: bytes, identity: str):
+        """Send directly to a peer with a distinct identity"""
+        logger.debug(f'Sending message via identity')
+        c = self._connections.get(identity)
+        if not c:
+            logger.error(f'Peer {identity} is not connected. Message '
+                         f'will be dropped.')
+
+        try:
+            c.writer_queue.put_nowait(message)
+            logger.debug('Placed message on connection writer queue.')
+        except asyncio.QueueFull:
+            logger.error(
+                'Dropped msg to Connection blah, its write '
+                'queue is full.'
+            )
+
     async def _sender_main(self):
         while True:
             q_task: asyncio.Task = self.loop.create_task(self._user_send_queue.get())
@@ -229,10 +241,12 @@ class SmartSocket:
                 [self.at_least_one_connection.wait(), q_task],
                 return_when=asyncio.ALL_COMPLETED
             )
-            data = q_task.result()
+            identity, data = q_task.result()
             logger.debug(f'Got data to send: {data}')
-            logger.debug('Sending the message.')
-            self.sender_handler(message=data)
+            if identity is not None:
+                self._sender_identity(data, identity)
+            else:
+                self.sender_handler(message=data)
 
     def check_socket_type(self):
         assert self.socket_type is None, (

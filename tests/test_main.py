@@ -1,12 +1,21 @@
+import sys
 import asyncio
-from contextlib import contextmanager
+from collections import defaultdict
+from contextlib import contextmanager, suppress
+from random import choice
+
 from aiosmartsock import SmartSocket, SendMode, SocketType
 import portpicker
 import pytest
 
 
+if sys.platform == 'win32':
+    loop = asyncio.ProactorEventLoop()
+    asyncio.set_event_loop(loop)
+
+
 loop = asyncio.get_event_loop()
-loop.set_debug(True)
+# loop.set_debug(True)
 create_task = loop.create_task
 
 
@@ -41,16 +50,6 @@ def conn_sock(host='127.0.0.1', port=25000, **kwargs) -> SmartSocket:
     with new_sock(**kwargs) as sock:
         run(sock.connect(host, port))
         yield sock
-
-
-@contextmanager
-def echo_sock(socktype: SocketType = SocketType.BINDER, **kwargs) -> SmartSocket:
-    if socktype is SocketType.BINDER:
-        with bind_sock(**kwargs) as sock:
-            yield sock
-    elif socktype is SocketType.CONNECTOR:
-        with conn_sock(**kwargs) as sock:
-            yield sock
 
 
 async def sock_receiver(message_type, sock: SmartSocket):
@@ -229,3 +228,63 @@ def test_many_connect():
     assert len(received) == 3
     assert received[0] == 'Blah'
     print(received)
+
+
+def test_identity():
+    size = 100
+    sends = defaultdict(list)
+    receipts = defaultdict(list)
+    with bind_sock(identity='server') as server:
+        with conn_sock(identity='c1') as c1, conn_sock(identity='c2') as c2:
+
+            async def c1listen():
+                with suppress(asyncio.CancelledError):
+                    while True:
+                        data = await c1.recv()
+                        receipts['c1'].append(data)
+
+            async def c2listen():
+                with suppress(asyncio.CancelledError):
+                    while True:
+                        identity, data = await c2.recv_identity()
+                        assert identity == 'server'
+                        receipts['c2'].append(data)
+
+            fut = asyncio.Future()
+
+            async def srvsend():
+                await asyncio.sleep(1)  # Wait for clients to connect.
+                for i in range(size):
+                    target_identity = choice(['c1', 'c2'])
+                    data = target_identity.encode()
+                    await server.send(
+                        data=data,
+                        identity=target_identity
+                    )
+                    sends[target_identity].append(data)
+                await asyncio.sleep(1)  # Wait for clients to receive msgs
+                fut.set_result(1)
+
+            t1 = loop.create_task(c1listen())
+            t2 = loop.create_task(c2listen())
+
+            loop.run_until_complete(srvsend())
+
+            t1.cancel()
+            t2.cancel()
+
+            loop.run_until_complete(asyncio.gather(t1, t2))
+
+    assert sum(len(v) for v in sends.values()) == size
+    assert sum(len(v) for v in receipts.values()) == size
+
+    assert sends == receipts
+
+
+
+
+
+
+
+
+
