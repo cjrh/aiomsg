@@ -35,6 +35,7 @@ def new_sock(*args, **kwargs) -> SmartSocket:
     try:
         yield sock
     finally:
+        print('CLOSING SOCK')
         run(sock.close())
 
 
@@ -281,6 +282,72 @@ def test_identity():
     assert sends == receipts
 
 
+def test_client_with_intermittent_server():
+
+    bind_send_mode = SendMode.ROUNDROBIN
+    conn_send_mode = SendMode.PUBLISH
+    message_type = 'bytes'
+    value = b'intermittent'
+
+    received = []
+    fut = asyncio.Future()
+
+    with conn_sock(send_mode=conn_send_mode) as client:
+        async def client_recv():
+            while True:
+                message = await sock_receiver(message_type, client)
+                print(f'Client received: {message}')
+                if message == b'END':
+                    fut.set_result(1)
+                    print('Client set future')
+                    return
+
+                received.append(message)
+
+        async def client_send():
+            for i in range(50):
+                print(f'SENDING #{i}')
+                await sock_sender(message_type, client, value)
+                await asyncio.sleep(0.2)
+            print(f'SENDING end')
+            await sock_sender(message_type, client, b'end')
+            print(f'SENT end')
+
+        create_task(client_recv())
+        create_task(client_send())
+        count = [0]
+
+        while not fut.done():
+            with bind_sock(send_mode=bind_send_mode) as server:
+                async def server_recv():
+                    while not fut.done():
+                        try:
+                            message = await sock_receiver(message_type, server)
+                        except asyncio.CancelledError:
+                            return
+
+                        message = message.decode().upper().encode()
+                        count[0] += 1
+                        print(f'SERVER GOT {count}')
+                        try:
+                            await sock_sender(message_type, server, message)
+                        except asyncio.CancelledError:
+                            await sock_sender(message_type, server, message)
+                            return
+
+                t = create_task(server_recv())
+                loop.call_later(3.0, t.cancel)
+                loop.run_until_complete(t)
+
+            # Server is gone, so client is running here without server
+            loop.run_until_complete(asyncio.sleep(0.5))
+
+            # run(fut, timeout=2)
+
+    print(received)
+    # assert received
+    # assert len(received) == 1
+    # assert received[0] == value
 
 
 
