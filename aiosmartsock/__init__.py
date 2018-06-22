@@ -120,40 +120,43 @@ class SmartSocket:
             recv_queue=self._queue_recv
         )
         if not self._connections:
+            logger.warning('First connection made')
             self.at_least_one_connection.set()
 
         self._connections[connection.identity] = connection
         # TODO: move this cycle updating into the dict update above
         # (e.g. customize with UserDict)
-        task: asyncio.Task = self.loop.create_task(connection.run())
-        task.connection = connection  # Used in the callback below
 
-        def callback(t):
-            logger.debug('connection closed')
-            if t.connection.identity in self._connections:
-                del self._connections[t.connection.identity]
+        await connection.run()
+        logger.debug('connection closed')
+        if connection.identity in self._connections:
+            del self._connections[connection.identity]
 
-            if not self._connections:
-                self.at_least_one_connection.clear()
-
-        task.add_done_callback(callback)
-        return task
+        if not self._connections:
+            logger.warning('No connections!')
+            self.at_least_one_connection.clear()
 
     async def _close(self):
+        logger.info(f'Closing {self.identity}')
         self.closed = True
         if self.server:
             # Stop new connections from being accepted.
             self.server.close()
             await self.server.wait_closed()
 
+        self.sender_task.cancel()
+        await self.sender_task
+
         results = asyncio.gather(
             *(c.close() for c in self._connections.values()),
             return_exceptions=True
         )
+        logger.info(f'Closed {self.identity}')
 
     async def close(self, timeout=10):
         try:
             await asyncio.wait_for(self._close(), timeout)
+            assert self.sender_task.done()
         except asyncio.TimeoutError:
             logger.exception('Timed out during close:')
 
@@ -238,10 +241,15 @@ class SmartSocket:
     async def _sender_main(self):
         while True:
             q_task: asyncio.Task = self.loop.create_task(self._user_send_queue.get())
-            done, pending = await asyncio.wait(
-                [self.at_least_one_connection.wait(), q_task],
-                return_when=asyncio.ALL_COMPLETED
-            )
+            try:
+                done, pending = await asyncio.wait(
+                    [self.at_least_one_connection.wait(), q_task],
+                    return_when=asyncio.ALL_COMPLETED
+                )
+            except asyncio.CancelledError:
+                q_task.cancel()
+                return
+
             identity, data = q_task.result()
             logger.debug(f'Got data to send: {data}')
             if identity is not None:
@@ -262,7 +270,7 @@ class SmartSocket:
         self.server = await coro
         logger.info('Server started.')
 
-    async def connect(self, hostname: str, port: int):
+    async def connect(self, hostname: str = '127.0.0.1', port: int = 25000):
         self.check_socket_type()
 
         async def connect_with_retry():
@@ -271,17 +279,18 @@ class SmartSocket:
                 try:
                     reader, writer = await asyncio.open_connection(
                         hostname, port, loop=self.loop)
+                    logger.info(f'Socket {self.identity} connected.')
                 except ConnectionError:
+                    logger.debug('Client connect error')
                     if self.closed:
                         break
                     else:
-                        logger.debug('Connection error, reconnecting...')
-                        await asyncio.sleep(0.1)
+                        logger.warning('Connection error, reconnecting...')
+                        await asyncio.sleep(0.01)
                         continue
 
                 logger.info('Connected.')
-                task = await self._connection(reader, writer)
-                await task
+                await self._connection(reader, writer)
                 logger.info('Connection dropped, reconnecting.')
         self.loop.create_task(connect_with_retry())
 
