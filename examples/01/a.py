@@ -1,7 +1,9 @@
 import logging
 import asyncio
 import aiosmartsock
-
+from colorama import init
+init()
+from colorama import Fore, Back, Style
 
 logging.basicConfig(level='DEBUG')
 
@@ -15,7 +17,7 @@ async def main():
         while True:
             print('waiting for a message...')
             msg = await s.recv_string()
-            print(f'Got {msg}')
+            print(Fore.GREEN + f'Got {msg}' + Style.RESET_ALL)
             await s.send_string(msg.upper())
 
     except asyncio.CancelledError:

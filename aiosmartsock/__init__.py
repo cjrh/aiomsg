@@ -253,8 +253,16 @@ class SmartSocket:
             logger.debug(f'Got connection: {identity}')
             try:
                 connection = self._connections[identity]
+                # It's hard to guarantee sending if we place messages
+                # on a queue here, because the cycle of peers is
+                # performed here. Therefore, instead we wait for
+                # successful sending using the send_wait method,
+                # and if that doesn't happen we try a different
+                # peer.
                 # connection.writer_queue.put_nowait(message)
-                await connection.send_wait(message)
+                await asyncio.wait_for(
+                    connection.send_wait(message),
+                    timeout=60)
                 logger.debug(f'Added message to connection send queue.')
                 sent = True
             except asyncio.QueueFull:
@@ -262,6 +270,9 @@ class SmartSocket:
                     'Cannot send to Connection blah, its write '
                     'queue is full!'
                 )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f'Timed out sending to {identity}')
 
     async def _sender_identity(self, message: bytes, identity: str):
         """Send directly to a peer with a distinct identity"""
@@ -305,6 +316,10 @@ class SmartSocket:
             f'Socket type has already been set: {self.socket_type}'
         )
 
+
+class HeartBeatFailed(ConnectionError): pass
+
+
 class Connection:
     def __init__(self, identity, reader: StreamReader, writer: StreamWriter,
                  recv_queue: asyncio.Queue, loop=None):
@@ -318,6 +333,10 @@ class Connection:
         self.reader_task: asyncio.Task = None
         self.writer_task: asyncio.Task = None
 
+        self.heartbeat_interval = 5
+        self.heartbeat_timeout = 15
+        self.heartbeat_message = b'aiosmartsock-heartbeat'
+
     async def close(self):
         # Kill the reader task
         self.reader_task.cancel()
@@ -330,8 +349,16 @@ class Connection:
         while True:
             try:
                 print('Waiting for messages in connection')
-                message = await msgproto.read_msg(self.reader)
+                message = await asyncio.wait_for(
+                    msgproto.read_msg(self.reader),
+                    timeout=self.heartbeat_timeout
+                )
                 print(f'Got message in connection: {message}')
+            except asyncio.TimeoutError:
+                logger.warning('Heartbeat failed')
+                self.writer_queue.put_nowait(None)
+                return
+                # raise HeartBeatFailed
             except asyncio.CancelledError:
                 return
 
@@ -339,6 +366,10 @@ class Connection:
                 logger.debug('Connection closed (recv)')
                 self.writer_queue.put_nowait(None)
                 return
+
+            if message == self.heartbeat_message:
+                logger.debug('Heartbeat received')
+                continue
 
             try:
                 logger.debug(f'Received message on connection: {message}')
@@ -356,12 +387,17 @@ class Connection:
     async def _send(self):
         while True:
             try:
-                message = await self.writer_queue.get()
+                message = await asyncio.wait_for(
+                    self.writer_queue.get(),
+                    timeout=self.heartbeat_interval
+                )
+                self.writer_queue.task_done()
+            except asyncio.TimeoutError:
+                logger.debug('Sending a heartbeat')
+                message = self.heartbeat_message
             except asyncio.CancelledError:
-                self.writer.close()
                 break
 
-            self.writer_queue.task_done()
             if not message:
                 logger.info('Connection closed (send)')
                 self.reader_task.cancel()
@@ -369,7 +405,7 @@ class Connection:
 
             logger.debug('Got message from connection writer queue.')
             try:
-                await msgproto.send_msg(self.writer, message)
+                await self.send_wait(message)
                 logger.debug('Sent message')
             except asyncio.CancelledError:
                 # Try to still send this message.

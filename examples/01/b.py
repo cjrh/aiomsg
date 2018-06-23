@@ -1,6 +1,10 @@
 import logging
 import asyncio
 import aiosmartsock
+import random
+from colorama import init
+init()
+from colorama import Fore, Back, Style
 
 
 logging.basicConfig(level='DEBUG')
@@ -14,16 +18,17 @@ async def main():
         while True:
             print('waiting for response...')
             msg = await s.recv_string()
-            print(f'Got back {msg}')
-            assert msg == 'CALEB'
+            print(Fore.GREEN + f'Got back {msg}' + Style.RESET_ALL)
+            # assert msg == 'CALEB'
 
     t = loop.create_task(r())
 
     try:
         while True:
             print('sending...')
-            await s.send_string('caleb')
-            await asyncio.sleep(1)
+            await s.send_string(Fore.BLUE + 'caleb' + Style.RESET_ALL)
+            await asyncio.sleep(
+                random.randint(0, 30))
 
     except asyncio.CancelledError:
         t.cancel()
