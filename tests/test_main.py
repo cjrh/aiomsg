@@ -236,6 +236,8 @@ def test_identity(loop):
                     while True:
                         data = await c1.recv()
                         receipts['c1'].append(data)
+                        if sum(len(v) for v in receipts.values()) == size:
+                            fut.set_result(1)
 
             async def c2listen():
                 with suppress(asyncio.CancelledError):
@@ -243,11 +245,13 @@ def test_identity(loop):
                         identity, data = await c2.recv_identity()
                         assert identity == 'server'
                         receipts['c2'].append(data)
+                        if sum(len(v) for v in receipts.values()) == size:
+                            fut.set_result(1)
 
             fut = asyncio.Future()
 
             async def srvsend():
-                await asyncio.sleep(1)  # Wait for clients to connect.
+                await asyncio.sleep(0.5)  # Wait for clients to connect.
                 for i in range(size):
                     target_identity = choice(['c1', 'c2'])
                     data = target_identity.encode()
@@ -256,8 +260,7 @@ def test_identity(loop):
                         identity=target_identity
                     )
                     sends[target_identity].append(data)
-                await asyncio.sleep(1)  # Wait for clients to receive msgs
-                fut.set_result(1)
+                await fut
 
             t1 = loop.create_task(c1listen())
             t2 = loop.create_task(c2listen())

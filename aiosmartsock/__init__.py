@@ -124,8 +124,6 @@ class SmartSocket:
             self.at_least_one_connection.set()
 
         self._connections[connection.identity] = connection
-        # TODO: move this cycle updating into the dict update above
-        # (e.g. customize with UserDict)
 
         await connection.run()
         logger.debug('connection closed')
@@ -228,6 +226,7 @@ class SmartSocket:
         if not c:
             logger.error(f'Peer {identity} is not connected. Message '
                          f'will be dropped.')
+            return
 
         try:
             c.writer_queue.put_nowait(message)
@@ -347,12 +346,12 @@ class Connection:
                 self.writer_queue.task_done()
             except asyncio.CancelledError:
                 self.writer.close()
-                return
+                break
 
             if not message:
                 logger.info('Connection closed (send)')
                 self.reader_task.cancel()
-                return
+                break
 
             logger.debug('Got message from connection writer queue.')
             try:
@@ -360,9 +359,9 @@ class Connection:
                 logger.debug('Sent message')
             except asyncio.CancelledError:
                 # Try to still send this message.
-                await msgproto.send_msg(self.writer, message)
-                self.writer.close()
-                return
+                # await msgproto.send_msg(self.writer, message)
+                break
+        self.writer.close()
 
     async def run(self):
         logger.info(f'Connection {self.identity} running.')
