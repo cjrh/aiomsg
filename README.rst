@@ -76,6 +76,14 @@ but you do all your ``send()`` and ``recv()`` calls on a single object.
 This allows the connecting end to behave kind-of like a "server" in
 certain configurations.
 
+- *Built-in heartbeating*
+
+Because ain't nobody got time to mess around with TCP keepalive
+settings. The heartbeating is internal and opaque your application
+code. You won't even know it's happening, unless you enable debug
+logs. Heartbeats are sent only during periods of inactivity, so
+they won't interfere with your application messages.
+
 - *Message distribution*
 
 For ``send()``, you can configure the socket to distribute messages
