@@ -102,6 +102,38 @@ class SmartSocket:
         else:  # pragma: no cover
             raise Exception('Unknown send mode.')
 
+    async def bind(self, hostname: str = '127.0.0.1', port: int = 25000):
+        self.check_socket_type()
+        logger.info(f'Binding socket {self.identity} to {hostname}:{port}')
+        coro = asyncio.start_server(self._connection, hostname, port,
+                                    loop=self.loop)
+        self.server = await coro
+        logger.info('Server started.')
+
+    async def connect(self, hostname: str = '127.0.0.1', port: int = 25000):
+        self.check_socket_type()
+
+        async def connect_with_retry():
+            logger.info(f'Socket {self.identity} connecting to {hostname}:{port}')
+            while not self.closed:
+                try:
+                    reader, writer = await asyncio.open_connection(
+                        hostname, port, loop=self.loop)
+                    logger.info(f'Socket {self.identity} connected.')
+                except ConnectionError:
+                    logger.debug('Client connect error')
+                    if self.closed:
+                        break
+                    else:
+                        logger.warning('Connection error, reconnecting...')
+                        await asyncio.sleep(0.01)
+                        continue
+
+                logger.info('Connected.')
+                await self._connection(reader, writer)
+                logger.info('Connection dropped, reconnecting.')
+        self.loop.create_task(connect_with_retry())
+
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
         """Each new connection will create a task with this coroutine."""
         logger.debug('Creating new connection')
@@ -110,29 +142,40 @@ class SmartSocket:
         logger.debug(f'Sending my identity {self.identity}')
         await msgproto.send_msg(writer, self.identity.encode())
         identity = await msgproto.read_msg(reader)  # This could time out.
-        logger.debug(f'Received identity {identity}')
+        if not identity:
+            return
 
-        # Create the connection object
+        logger.debug(f'Received identity {identity}')
+        if identity in self._connections:
+            logger.error(f'Socket with identity {identity} is already '
+                         f'connected. This connection will not be created.')
+            return
+
+        # Create the connection object. These objects are kept in a
+        # collection that is used for message distribution.
         connection = Connection(
-            identity=identity.decode(),  # The identity should come from the client!
+            identity=identity.decode(),
             reader=reader,
             writer=writer,
             recv_queue=self._queue_recv
         )
-        if not self._connections:
+        self._connections[connection.identity] = connection
+        if len(self._connections) == 1:
             logger.warning('First connection made')
             self.at_least_one_connection.set()
 
-        self._connections[connection.identity] = connection
+        try:
+            await connection.run()
+        except asyncio.CancelledError:
+            logger.info(f'Connection {identity} cancelled.')
+        finally:
+            logger.debug('connection closed')
+            if connection.identity in self._connections:
+                del self._connections[connection.identity]
 
-        await connection.run()
-        logger.debug('connection closed')
-        if connection.identity in self._connections:
-            del self._connections[connection.identity]
-
-        if not self._connections:
-            logger.warning('No connections!')
-            self.at_least_one_connection.clear()
+            if not self._connections:
+                logger.warning('No connections!')
+                self.at_least_one_connection.clear()
 
     async def _close(self):
         logger.info(f'Closing {self.identity}')
@@ -186,7 +229,7 @@ class SmartSocket:
     async def send_json(self, obj: JSONCompatible, identity: Optional[str] = None):
         await self.send_string(json.dumps(obj), identity)
 
-    def _sender_publish(self, message: bytes):
+    async def _sender_publish(self, message: bytes):
         logger.debug(f'Sending message via publish')
         # TODO: implement grouping by named channels
         for identity, c in self._connections.items():
@@ -200,7 +243,7 @@ class SmartSocket:
                     'queue is full.'
                 )
 
-    def _sender_robin(self, message: bytes):
+    async def _sender_robin(self, message: bytes):
         logger.debug(f'Sending message via round_robin')
         sent = False
         while not sent:
@@ -210,7 +253,8 @@ class SmartSocket:
             logger.debug(f'Got connection: {identity}')
             try:
                 connection = self._connections[identity]
-                connection.writer_queue.put_nowait(message)
+                # connection.writer_queue.put_nowait(message)
+                await connection.send_wait(message)
                 logger.debug(f'Added message to connection send queue.')
                 sent = True
             except asyncio.QueueFull:
@@ -219,7 +263,7 @@ class SmartSocket:
                     'queue is full!'
                 )
 
-    def _sender_identity(self, message: bytes, identity: str):
+    async def _sender_identity(self, message: bytes, identity: str):
         """Send directly to a peer with a distinct identity"""
         logger.debug(f'Sending message via identity')
         c = self._connections.get(identity)
@@ -252,47 +296,14 @@ class SmartSocket:
             identity, data = q_task.result()
             logger.debug(f'Got data to send: {data}')
             if identity is not None:
-                self._sender_identity(data, identity)
+                await self._sender_identity(data, identity)
             else:
-                self.sender_handler(message=data)
+                await self.sender_handler(message=data)
 
     def check_socket_type(self):
         assert self.socket_type is None, (
             f'Socket type has already been set: {self.socket_type}'
         )
-
-    async def bind(self, hostname: str = '127.0.0.1', port: int = 25000):
-        self.check_socket_type()
-        logger.info(f'Binding socket {self.identity} to {hostname}:{port}')
-        coro = asyncio.start_server(self._connection, hostname, port,
-                                    loop=self.loop)
-        self.server = await coro
-        logger.info('Server started.')
-
-    async def connect(self, hostname: str = '127.0.0.1', port: int = 25000):
-        self.check_socket_type()
-
-        async def connect_with_retry():
-            logger.info(f'Socket {self.identity} connecting to {hostname}:{port}')
-            while not self.closed:
-                try:
-                    reader, writer = await asyncio.open_connection(
-                        hostname, port, loop=self.loop)
-                    logger.info(f'Socket {self.identity} connected.')
-                except ConnectionError:
-                    logger.debug('Client connect error')
-                    if self.closed:
-                        break
-                    else:
-                        logger.warning('Connection error, reconnecting...')
-                        await asyncio.sleep(0.01)
-                        continue
-
-                logger.info('Connected.')
-                await self._connection(reader, writer)
-                logger.info('Connection dropped, reconnecting.')
-        self.loop.create_task(connect_with_retry())
-
 
 class Connection:
     def __init__(self, identity, reader: StreamReader, writer: StreamWriter,
@@ -339,15 +350,18 @@ class Connection:
                     'queue is full!'
                 )
 
+    async def send_wait(self, message):
+        await msgproto.send_msg(self.writer, message)
+
     async def _send(self):
         while True:
             try:
                 message = await self.writer_queue.get()
-                self.writer_queue.task_done()
             except asyncio.CancelledError:
                 self.writer.close()
                 break
 
+            self.writer_queue.task_done()
             if not message:
                 logger.info('Connection closed (send)')
                 self.reader_task.cancel()

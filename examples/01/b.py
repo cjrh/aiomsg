@@ -9,16 +9,25 @@ logging.basicConfig(level='DEBUG')
 async def main():
     s = aiosmartsock.SmartSocket()
     await s.connect()
-    try:
+
+    async def r():
         while True:
-            await s.send_string('caleb')
+            print('waiting for response...')
             msg = await s.recv_string()
             print(f'Got back {msg}')
             assert msg == 'CALEB'
+
+    t = loop.create_task(r())
+
+    try:
+        while True:
+            print('sending...')
+            await s.send_string('caleb')
             await asyncio.sleep(1)
 
     except asyncio.CancelledError:
-        pass
+        t.cancel()
+        await t
 
 
 if __name__ == '__main__':
