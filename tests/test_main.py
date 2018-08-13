@@ -352,6 +352,8 @@ def test_client_with_intermittent_server(loop):
 
 
 def test_connection(loop):
+    PORT = portpicker.pick_unused_port()
+
     async def srv():
         """Echo server"""
 
@@ -377,7 +379,7 @@ def test_connection(loop):
         s = None
         try:
             s = await asyncio.start_server(client_connected_cb=cb,
-                                           host='127.0.0.1', port=25000)
+                                           host='127.0.0.1', port=PORT)
             # await s.wait_closed()
             await asyncio.sleep(1000)
         except asyncio.CancelledError:
@@ -393,7 +395,7 @@ def test_connection(loop):
 
     async def client():
         reader, writer = await asyncio.open_connection(host='127.0.0.1',
-                                                       port=25000)
+                                                       port=PORT)
 
         c = aiosmartsock.Connection(
             identity=str(uuid4()),
