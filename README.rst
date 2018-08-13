@@ -1,3 +1,25 @@
+.. image:: https://travis-ci.org/cjrh/aiosmartsock.svg?branch=master
+    :target: https://travis-ci.org/cjrh/aiosmartsock
+
+.. image:: https://coveralls.io/repos/github/cjrh/aiosmartsock/badge.svg?branch=master
+    :target: https://coveralls.io/github/cjrh/aiosmartsock?branch=master
+
+.. image:: https://img.shields.io/pypi/pyversions/aiosmartsock.svg
+    :target: https://pypi.python.org/pypi/aiosmartsock
+
+.. image:: https://img.shields.io/github/tag/cjrh/aiosmartsock.svg
+    :target: https://img.shields.io/github/tag/cjrh/aiosmartsock.svg
+
+.. image:: https://img.shields.io/badge/install-pip%20install%20aiosmartsock-ff69b4.svg
+    :target: https://img.shields.io/badge/install-pip%20install%20aiosmartsock-ff69b4.svg
+
+.. image:: https://img.shields.io/pypi/v/aiosmartsock.svg
+    :target: https://img.shields.io/pypi/v/aiosmartsock.svg
+
+.. image:: https://img.shields.io/badge/calver-YYYY.MM.MINOR-22bfda.svg
+    :target: http://calver.org/
+
+
 aiosmartsock
 ============
 
