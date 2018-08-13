@@ -31,7 +31,7 @@ setup(
     keywords='asyncio socket network',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     extras_require={
-        'dev': ['check-manifest', 'colorama'],
+        'dev': ['check-manifest', 'colorama', 'pygments', 'twine'],
         'test': ['pytest', 'pytest-cov', 'portpicker', 'pytest-benchmark'],
     },
 )
