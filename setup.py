@@ -13,8 +13,8 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup(
     name='aiosmartsock',
-    version='2018.6.3',
-    description='An ode to ØMQ',
+    version='2018.8.1',
+    description='Smart sockets',
     long_description=long_description,
     long_description_content_type='text/x-rst',
     url='https://github.com/cjrh/aiosmartsock',
@@ -26,6 +26,7 @@ setup(
         'Topic :: Software Development :: Build Tools',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
     ],
     keywords='asyncio socket network',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
