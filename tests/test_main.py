@@ -412,7 +412,7 @@ def test_connection(loop):
         await cln_task
 
     run(client(), 60)
-    run(asyncio.sleep(1.5))
+    run(asyncio.sleep(0.5))
     srv_task.cancel()
     run(srv_task)
     assert srv_task.done()
