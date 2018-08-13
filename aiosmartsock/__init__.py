@@ -317,7 +317,8 @@ class SmartSocket:
         )
 
 
-class HeartBeatFailed(ConnectionError): pass
+class HeartBeatFailed(ConnectionError):
+    pass
 
 
 class Connection:
