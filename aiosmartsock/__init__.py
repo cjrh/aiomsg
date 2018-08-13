@@ -426,7 +426,8 @@ class Connection:
                 return_when=asyncio.ALL_COMPLETED
             )
         except asyncio.CancelledError:
+            self.reader_task.cancel()
+            self.writer_task.cancel()
             group = asyncio.gather(self.reader_task, self.writer_task)
-            group.cancel()
             await group
         logger.info(f'Connection {self.identity} no longer active.')
