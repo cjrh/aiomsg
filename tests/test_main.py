@@ -86,8 +86,9 @@ def test_hello(loop, bind_send_mode, conn_send_mode, message_type, value):
 
     received = []
     fut = asyncio.Future()
+    PORT = portpicker.pick_unused_port()
 
-    with bind_sock(send_mode=bind_send_mode) as server:
+    with bind_sock(send_mode=bind_send_mode, port=PORT) as server:
         async def server_recv():
             message = await sock_receiver(message_type, server)
             print(f'Server received {message}')
@@ -95,7 +96,7 @@ def test_hello(loop, bind_send_mode, conn_send_mode, message_type, value):
 
         loop.create_task(server_recv())
 
-        with conn_sock(send_mode=conn_send_mode) as client:
+        with conn_sock(send_mode=conn_send_mode, port=PORT) as client:
             async def client_recv():
                 message = await sock_receiver(message_type, client)
                 print(f'Client received: {message}')
@@ -127,8 +128,8 @@ def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type,
 
     received = []
     fut = asyncio.Future()
-
-    with conn_sock(send_mode=conn_send_mode) as client:
+    PORT = portpicker.pick_unused_port()
+    with conn_sock(send_mode=conn_send_mode, port=PORT) as client:
         async def client_recv():
             message = await sock_receiver(message_type, client)
             print(f'Client received: {message}')
@@ -137,7 +138,7 @@ def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type,
 
         loop.create_task(client_recv())
 
-        with bind_sock(send_mode=bind_send_mode) as server:
+        with bind_sock(send_mode=bind_send_mode, port=PORT) as server:
             async def server_recv():
                 message = await sock_receiver(message_type, server)
                 await sock_sender(message_type, server, message)
@@ -154,8 +155,9 @@ def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type,
 
 def test_context_managers(loop):
     value = b'hello'
+    PORT = portpicker.pick_unused_port()
 
-    with bind_sock() as bsock, conn_sock() as csock:
+    with bind_sock(port=PORT) as bsock, conn_sock(port=PORT) as csock:
         async def test():
             await bsock.send(value)
             out = await csock.recv()
@@ -169,7 +171,6 @@ def test_many_connect(loop):
 
     received = []
     port = portpicker.pick_unused_port()
-    port = 25000
 
     async def srv():
         server = SmartSocket()
@@ -233,8 +234,9 @@ def test_identity(loop):
     size = 100
     sends = defaultdict(list)
     receipts = defaultdict(list)
-    with bind_sock(identity='server') as server:
-        with conn_sock(identity='c1') as c1, conn_sock(identity='c2') as c2:
+    PORT = portpicker.pick_unused_port()
+    with bind_sock(identity='server', port=PORT) as server:
+        with conn_sock(identity='c1', port=PORT) as c1, conn_sock(identity='c2', port=PORT) as c2:
 
             async def c1listen():
                 with suppress(asyncio.CancelledError):
@@ -292,8 +294,9 @@ def test_client_with_intermittent_server(loop):
 
     received = []
     fut = asyncio.Future()
+    PORT = portpicker.pick_unused_port()
 
-    with conn_sock(send_mode=conn_send_mode) as client:
+    with conn_sock(send_mode=conn_send_mode, port=PORT) as client:
         async def client_recv():
             while True:
                 message = await sock_receiver(message_type, client)
@@ -319,7 +322,7 @@ def test_client_with_intermittent_server(loop):
         count = [0]
 
         while not fut.done():
-            with bind_sock(send_mode=bind_send_mode) as server:
+            with bind_sock(send_mode=bind_send_mode, port=PORT) as server:
                 async def server_recv():
                     while not fut.done():
                         try:
