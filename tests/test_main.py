@@ -72,12 +72,14 @@ async def sock_sender(message_type, sock: SmartSocket, data):
         raise Exception('Unknown message type')
 
 
-@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
-@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('bind_send_mode',
+                         [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('conn_send_mode',
+                         [SendMode.PUBLISH, SendMode.ROUNDROBIN])
 @pytest.mark.parametrize('message_type, value', [
     ('bytes', b'blah'),
     ('str', 'blah'),
-    ('json', dict(a=1, b='hi', c=[1,2,3])),
+    ('json', dict(a=1, b='hi', c=[1, 2, 3])),
 ])
 def test_hello(loop, bind_send_mode, conn_send_mode, message_type, value):
     """One server, one client, echo server"""
@@ -94,7 +96,6 @@ def test_hello(loop, bind_send_mode, conn_send_mode, message_type, value):
         loop.create_task(server_recv())
 
         with conn_sock(send_mode=conn_send_mode) as client:
-
             async def client_recv():
                 message = await sock_receiver(message_type, client)
                 print(f'Client received: {message}')
@@ -111,14 +112,17 @@ def test_hello(loop, bind_send_mode, conn_send_mode, message_type, value):
     assert received[0] == value
 
 
-@pytest.mark.parametrize('bind_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
-@pytest.mark.parametrize('conn_send_mode', [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('bind_send_mode',
+                         [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize('conn_send_mode',
+                         [SendMode.PUBLISH, SendMode.ROUNDROBIN])
 @pytest.mark.parametrize('message_type, value', [
     ('bytes', b'blah'),
     ('str', 'blah'),
-    ('json', dict(a=1, b='hi', c=[1,2,3])),
+    ('json', dict(a=1, b='hi', c=[1, 2, 3])),
 ])
-def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type, value):
+def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type,
+                      value):
     """One server, one client, echo server"""
 
     received = []
@@ -130,6 +134,7 @@ def test_hello_before(loop, bind_send_mode, conn_send_mode, message_type, value)
             print(f'Client received: {message}')
             received.append(message)
             fut.set_result(1)
+
         loop.create_task(client_recv())
 
         with bind_sock(send_mode=bind_send_mode) as server:
@@ -280,7 +285,6 @@ def test_identity(loop):
 
 @pytest.mark.skip(reason='currently broken')
 def test_client_with_intermittent_server(loop):
-
     bind_send_mode = SendMode.ROUNDROBIN
     conn_send_mode = SendMode.PUBLISH
     message_type = 'bytes'
@@ -402,13 +406,13 @@ def test_connection(loop):
 
         for i in range(10):
             await c.writer_queue.put(f'{i}'.encode())
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)
 
         cln_task.cancel()
         await cln_task
 
     run(client(), 60)
-    run(asyncio.sleep(0.5))
+    run(asyncio.sleep(1.5))
     srv_task.cancel()
     run(srv_task)
     assert srv_task.done()
@@ -416,4 +420,3 @@ def test_connection(loop):
     print(f'q size: {q.qsize()}')
     while not q.empty():
         print(q.get_nowait())
-
