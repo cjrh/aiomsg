@@ -394,6 +394,8 @@ def test_connection(loop):
                 await s.wait_closed()
 
     srv_task = loop.create_task(srv())
+    # Wait a bit, let the server come up
+    run(asyncio.sleep(0.5))
     q = asyncio.Queue()
 
     async def client():
