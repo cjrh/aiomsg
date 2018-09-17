@@ -188,7 +188,7 @@ class SmartSocket:
         self.sender_task.cancel()
         await self.sender_task
 
-        results = asyncio.gather(
+        results = await asyncio.gather(
             *(c.close() for c in self._connections.values()),
             return_exceptions=True
         )
