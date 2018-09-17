@@ -182,7 +182,7 @@ def test_many_connect(loop):
         except asyncio.CancelledError:
             await server.close()
 
-    server_task = create_task(srv())
+    server_task = loop.create_task(srv())
 
     async def inner():
 
@@ -198,7 +198,7 @@ def test_many_connect(loop):
 
         # Connect the clients
         for i in range(3):
-            create_task(cnt())
+            loop.create_task(cnt())
 
         await asyncio.sleep(0.1)
 
@@ -210,7 +210,7 @@ def test_many_connect(loop):
                 rec_future.set_result(1)
 
         for c in clients:
-            create_task(listen(c))
+            loop.create_task(listen(c))
 
         await asyncio.sleep(0.1)
 
