@@ -5,8 +5,8 @@ from contextlib import contextmanager, suppress
 from random import choice
 from uuid import uuid4
 
-import aiosmartsock
-from aiosmartsock import SmartSocket, SendMode, SocketType
+import aiomsg
+from aiomsg import SmartSocket, SendMode, SocketType
 import portpicker
 import pytest
 
@@ -369,11 +369,11 @@ def test_connection(loop):
             try:
                 while True:
                     try:
-                        msg = await aiosmartsock.msgproto.read_msg(reader)
+                        msg = await aiomsg.msgproto.read_msg(reader)
                         if not msg:
                             break
                         print(f'Server got {msg}')
-                        await aiosmartsock.msgproto.send_msg(writer, msg)
+                        await aiomsg.msgproto.send_msg(writer, msg)
                     except asyncio.CancelledError:
                         break
             finally:
@@ -402,7 +402,7 @@ def test_connection(loop):
         reader, writer = await asyncio.open_connection(host='127.0.0.1',
                                                        port=PORT)
 
-        c = aiosmartsock.Connection(
+        c = aiomsg.Connection(
             identity=str(uuid4()),
             reader=reader,
             writer=writer,

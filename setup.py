@@ -11,13 +11,20 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
     long_description = f.read()
 
+extras_require = {
+    'dev': ['check-manifest', 'colorama', 'pygments', 'twine'],
+    'test': ['pytest', 'pytest-cov', 'portpicker', 'pytest-benchmark'],
+    'doc': ['sphinx'],
+}
+extras_require['all'] = list({v for k, v in extras_require.items()})
+
 setup(
-    name='aiosmartsock',
+    name='aiomsg',
     version='2018.8.1',
-    description='Smart sockets',
+    description='Socket-based abstraction for messaging patterns',
     long_description=long_description,
     long_description_content_type='text/x-rst',
-    url='https://github.com/cjrh/aiosmartsock',
+    url='https://github.com/cjrh/aiomsg',
     author='Caleb Hattingh',
     author_email='caleb.hattingh@gmail.com',
     classifiers=[
@@ -30,9 +37,5 @@ setup(
     ],
     keywords='asyncio socket network',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
-    extras_require={
-        'dev': ['check-manifest', 'colorama', 'pygments', 'twine'],
-        'test': ['pytest', 'pytest-cov', 'portpicker', 'pytest-benchmark'],
-        'doc': ['sphinx'],
-    },
+    extras_require=extras_require,
 )

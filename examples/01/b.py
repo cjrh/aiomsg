@@ -1,6 +1,6 @@
 import logging
 import asyncio
-import aiosmartsock
+import aiomsg
 import random
 from colorama import init
 init()
@@ -11,7 +11,7 @@ logging.basicConfig(level='DEBUG')
 
 
 async def main():
-    s = aiosmartsock.SmartSocket()
+    s = aiomsg.SmartSocket()
     await s.connect()
 
     async def r():

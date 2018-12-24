@@ -1,6 +1,6 @@
 import logging
 import asyncio
-import aiosmartsock
+import aiomsg
 from colorama import init
 init()
 from colorama import Fore, Back, Style
@@ -9,8 +9,8 @@ logging.basicConfig(level='DEBUG')
 
 
 async def main():
-    s = aiosmartsock.SmartSocket(
-        send_mode=aiosmartsock.SendMode.ROUNDROBIN
+    s = aiomsg.SmartSocket(
+        send_mode=aiomsg.SendMode.ROUNDROBIN
     )
     await s.bind()
     try:

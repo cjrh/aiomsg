@@ -336,7 +336,7 @@ class Connection:
 
         self.heartbeat_interval = 5
         self.heartbeat_timeout = 15
-        self.heartbeat_message = b'aiosmartsock-heartbeat'
+        self.heartbeat_message = b'aiomsg-heartbeat'
 
     async def close(self):
         # Kill the reader task
