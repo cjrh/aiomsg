@@ -33,5 +33,6 @@ setup(
     extras_require={
         'dev': ['check-manifest', 'colorama', 'pygments', 'twine'],
         'test': ['pytest', 'pytest-cov', 'portpicker', 'pytest-benchmark'],
+        'doc': ['sphinx'],
     },
 )
