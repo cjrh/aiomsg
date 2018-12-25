@@ -1,26 +1,39 @@
-""" (Servers)
+"""
+
+aiomsg
+======
+
+ (Servers)
 
 Broadly 3 kinds of transmission (ends):
+
 - receive-only
 - send-only
 - duplex
 
 Broadly 2 kinds of distribution patterns:
+
 - other ends receive all messages
 - other ends get round-robin
 
 Broadly 2 kinds of receiving patterns (this is minor):
+
 - keep receiving from a client while there is data
 - force switch after each message
 
 Broadly 2 kinds of health/heartbeat patterns:
+
 - for send-only+receive-only: receiver reconnects on timeout
 - for duplex: connector sends a ping, binder sends pong. Connector must
   reconnect on a pong timeout
 
-Run tests with watchmedo (available after ```pip install Watchdog``):
+Run tests with watchmedo (available after ``pip install Watchdog`` ):
 
-watchmedo shell-command -W -D -R -c 'clear && py.test -s --durations=10 -vv' -p '*.py'
+.. code-block:: bash
+
+    watchmedo shell-command -W -D -R \\
+        -c 'clear && py.test -s --durations=10 -vv' \\
+        -p '*.py'
 
 """
 import logging

@@ -10,6 +10,8 @@ Welcome to aiomsg's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   mod
+
 
 
 Indices and tables

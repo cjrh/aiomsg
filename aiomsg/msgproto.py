@@ -1,3 +1,11 @@
+"""
+aiomsg.msgproto
+===============
+
+These are messaging protocols
+
+"""
+
 import logging
 from asyncio import StreamReader, StreamWriter, IncompleteReadError
 
