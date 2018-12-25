@@ -16,7 +16,7 @@ extras_require = {
     'test': ['pytest', 'pytest-cov', 'portpicker', 'pytest-benchmark'],
     'doc': ['sphinx'],
 }
-extras_require['all'] = list({v for k, v in extras_require.items()})
+extras_require['all'] = list({pkg for k, v in extras_require.items() for pkg in v})
 
 setup(
     name='aiomsg',
