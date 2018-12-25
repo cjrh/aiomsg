@@ -1,26 +1,26 @@
-.. image:: https://travis-ci.org/cjrh/aiosmartsock.svg?branch=master
-    :target: https://travis-ci.org/cjrh/aiosmartsock
+.. image:: https://travis-ci.org/cjrh/aiomsg.svg?branch=master
+    :target: https://travis-ci.org/cjrh/aiomsg
 
-.. image:: https://coveralls.io/repos/github/cjrh/aiosmartsock/badge.svg?branch=master
-    :target: https://coveralls.io/github/cjrh/aiosmartsock?branch=master
+.. image:: https://coveralls.io/repos/github/cjrh/aiomsg/badge.svg?branch=master
+    :target: https://coveralls.io/github/cjrh/aiomsg?branch=master
 
-.. image:: https://img.shields.io/pypi/pyversions/aiosmartsock.svg
-    :target: https://pypi.python.org/pypi/aiosmartsock
+.. image:: https://img.shields.io/pypi/pyversions/aiomsg.svg
+    :target: https://pypi.python.org/pypi/aiomsg
 
-.. image:: https://img.shields.io/github/tag/cjrh/aiosmartsock.svg
-    :target: https://img.shields.io/github/tag/cjrh/aiosmartsock.svg
+.. image:: https://img.shields.io/github/tag/cjrh/aiomsg.svg
+    :target: https://img.shields.io/github/tag/cjrh/aiomsg.svg
 
-.. image:: https://img.shields.io/badge/install-pip%20install%20aiosmartsock-ff69b4.svg
-    :target: https://img.shields.io/badge/install-pip%20install%20aiosmartsock-ff69b4.svg
+.. image:: https://img.shields.io/badge/install-pip%20install%20aiomsg-ff69b4.svg
+    :target: https://img.shields.io/badge/install-pip%20install%20aiomsg-ff69b4.svg
 
-.. image:: https://img.shields.io/pypi/v/aiosmartsock.svg
-    :target: https://img.shields.io/pypi/v/aiosmartsock.svg
+.. image:: https://img.shields.io/pypi/v/aiomsg.svg
+    :target: https://img.shields.io/pypi/v/aiomsg.svg
 
 .. image:: https://img.shields.io/badge/calver-YYYY.MM.MINOR-22bfda.svg
     :target: http://calver.org/
 
 
-aiosmartsock
+aiomsg
 ============
 
 Have you used ZeroMQ before? This is a lot like that, but much slower,
@@ -34,7 +34,7 @@ Here's the end that binds to a port (a.k.a, the "server"):
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     async def main():
         sock = SmartSocket()
@@ -53,7 +53,7 @@ Here is the end that does the connecting (a.k.a, the "client"):
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     async def main():
         sock = SmartSocket()
@@ -74,7 +74,7 @@ Here is the end that does the connecting (a.k.a, the "client"):
 
 Looks a lot like ZeroMQ, yes? no? Well if you don't know anything about
 ZeroMQ, that's fine too. The rest of this document will assume that you
-don't know anything about ZeroMQ. ``aiosmartsock`` is **heavily**
+don't know anything about ZeroMQ. ``aiomsg`` is **heavily**
 modelled after ZeroMQ, to the point of being an almost-clone in the
 general feature set.
 
@@ -99,7 +99,7 @@ Introduction
 ------------
 
 What you see above in the demo is pretty much a typical usage of
-network sockets. So what's special about ``aiosmartsock``? These are
+network sockets. So what's special about ``aiomsg``? These are
 the high-level features:
 
 - *Messages, not streams*
@@ -160,7 +160,7 @@ message to *all* connected peers):
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket, SendMode
+    from aiomsg import SmartSocket, SendMode
 
     async def main():
         sock = SmartSocket(send_mode=SendMode.PUBLISH)
@@ -177,7 +177,7 @@ message to *all* connected peers):
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     async def sub():
         sock = SmartSocket()
@@ -199,7 +199,7 @@ end, and 10 *bind* sockets as the SUB listeners:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     ports = range(25000, 25010)
 
@@ -219,7 +219,7 @@ end, and 10 *bind* sockets as the SUB listeners:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     ports = range(25000, 25010)
 
@@ -252,7 +252,7 @@ peer.
 This isn't really "load balancing" of course. To do load balancing properly,
 you would have to incorporate some mechanism for understanding when work
 had been completed by any particular peer. You would be able to build
-this kind of logic *on top of* ``aiosmartsock``.
+this kind of logic *on top of* ``aiomsg``.
 
 Anyway, let's see an example. This example is *exactly* the same as
 the PUBSUB example earlier, except that the "send mode" is changed:
@@ -260,7 +260,7 @@ the PUBSUB example earlier, except that the "send mode" is changed:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket, SendMode
+    from aiomsg import SmartSocket, SendMode
 
     async def main():
         sock = SmartSocket(send_mode=SendMode.ROUNDROBIN)
@@ -281,7 +281,7 @@ as a way of showing how work can be spread across a group of peers:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     async def sub():
         sock = SmartSocket()
@@ -300,7 +300,7 @@ and connecting ends:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     ports = range(25000, 25010)
 
@@ -323,7 +323,7 @@ and connecting ends:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     ports = range(25000, 25010)
 
@@ -352,7 +352,7 @@ send-mode either:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket, SendMode
+    from aiomsg import SmartSocket, SendMode
 
     async def main():
         sock = SmartSocket(send_mode=SendMode.ROUNDROBIN)
@@ -384,7 +384,7 @@ The corresponding peer code is straightforward:
 .. code-block:: python3
 
     import asyncio
-    from aiosmartsock import SmartSocket
+    from aiomsg import SmartSocket
 
     async def sub():
         sock = SmartSocket()
