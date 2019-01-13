@@ -21,10 +21,9 @@
 
 
 aiomsg
-============
+======
 
-Have you used ZeroMQ before? This is a lot like that, but much slower,
-probably buggier, and very pure-Pythonesque.
+Send/receive messages over TCP sockets for microservices.
 
 Demo
 ----
