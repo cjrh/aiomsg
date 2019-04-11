@@ -46,7 +46,7 @@ def conn_sock(host='127.0.0.1', port=25000, **kwargs) -> SmartSocket:
         yield sock
 
 
-async def sock_receiver(message_type, sock: SmartSocket):
+async def sock_receiver(message_type: str, sock: SmartSocket):
     if message_type == 'bytes':
         message = await sock.recv()
     elif message_type == 'str':
@@ -59,7 +59,7 @@ async def sock_receiver(message_type, sock: SmartSocket):
     return message
 
 
-async def sock_sender(message_type, sock: SmartSocket, data):
+async def sock_sender(message_type: str, sock: SmartSocket, data):
     if message_type == 'bytes':
         assert isinstance(data, bytes)
         await sock.send(data)
