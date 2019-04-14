@@ -40,7 +40,6 @@ import logging
 import asyncio
 import uuid
 import json
-import ssl
 from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import UserDict
@@ -263,7 +262,7 @@ class SmartSocket:
                 logger.debug("Placed message on connection writer queue.")
             except asyncio.QueueFull:
                 logger.error(
-                    "Dropped msg to Connection blah, its write " "queue is full."
+                    f"Dropped msg to Connection {identity}, its write queue is full."
                 )
 
     async def _sender_robin(self, message: bytes):
