@@ -1,6 +1,9 @@
 .. image:: https://travis-ci.org/cjrh/aiomsg.svg?branch=master
     :target: https://travis-ci.org/cjrh/aiomsg
 
+.. image:: https://ci.appveyor.com/api/projects/status/66bgl8r2aixm5f67/branch/master?svg=true
+    :target: https://ci.appveyor.com/project/cjrh/aiomsg
+
 .. image:: https://coveralls.io/repos/github/cjrh/aiomsg/badge.svg?branch=master
     :target: https://coveralls.io/github/cjrh/aiomsg?branch=master
 
@@ -18,6 +21,9 @@
 
 .. image:: https://img.shields.io/badge/calver-YYYY.MM.MINOR-22bfda.svg
     :target: http://calver.org/
+
+.. image:: https://img.shields.io/badge/code%20style-black-000000.svg
+    :target: https://github.com/ambv/black
 
 
 aiomsg
