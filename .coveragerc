@@ -1,9 +1,4 @@
 [run]
 branch = True
-source =
-    aiomsg
-omit =
-    setup.py
-    venv/*
-    test/*
-
+include =
+    aiomsg/*
