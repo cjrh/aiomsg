@@ -29,7 +29,7 @@
 aiomsg
 ======
 
-Send/receive messages over TCP sockets for microservices.
+Pure-Python smart sockets (like ZMQ) for simple microservices architecture
 
 Demo
 ----
