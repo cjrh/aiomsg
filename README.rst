@@ -83,8 +83,10 @@ don't know anything about ZeroMQ. ``aiomsg`` is **heavily**
 modelled after ZeroMQ, to the point of being an almost-clone in the
 general feature set.
 
+There are some differences; hopefully they make things simpler than zmq.
+
 For instance, we don't have special kinds of sockets. There is only the
-``SmartSocket``. The main role distinction you must make between different
+``SmartSocket``. The only role distinction you must make between different
 socket instances is this: some sockets will **bind** and others will
 **connect**. This is the leaky part of the API that comes from the
 underlying BSD socket API. A *bind* socket will bind to a local interface
