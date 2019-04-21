@@ -461,6 +461,13 @@ class Connection:
                 await self.send_wait(message)
                 self.writer_queue.task_done()
                 logger.debug("Sent message")
+            except (ConnectionAbortedError, ConnectionResetError) as e:
+                logger.exception(
+                    f"Connection {self.identity} aborted, dropping "
+                    f"message: {message[:50]}...{message[-50:]}\n"
+                    f"error: {e}"
+                )
+                break
             except asyncio.CancelledError:
                 # Try to still send this message.
                 # await msgproto.send_msg(self.writer, message)
