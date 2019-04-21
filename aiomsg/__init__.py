@@ -55,6 +55,10 @@ SEND_MODES = ["round_robin", "publish"]
 JSONCompatible = Union[str, int, float, bool, List, Dict, None]
 
 
+class NoConnectionsAvailableError(Exception):
+    pass
+
+
 class SendMode(Enum):
     PUBLISH = auto()
     ROUNDROBIN = auto()
@@ -68,6 +72,7 @@ class SocketType(Enum):
 class ConnectionsDict(UserDict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.cycle = None
         self.update_cycle()
 
     def __setitem__(self, key, value):
@@ -82,7 +87,10 @@ class ConnectionsDict(UserDict):
         self.cycle = cycle(self.data)
 
     def __next__(self):
-        return next(self.cycle)
+        try:
+            return next(self.cycle)
+        except StopIteration:
+            raise NoConnectionsAvailableError
 
 
 class SmartSocket:
@@ -325,7 +333,18 @@ class SmartSocket:
             if identity is not None:
                 await self._sender_identity(data, identity)
             else:
-                await self.sender_handler(message=data)
+                try:
+                    await self.sender_handler(message=data)
+                except NoConnectionsAvailableError:
+                    try:
+                        # Put it back onto the queue
+                        self._user_send_queue.put_nowait((identity, data))
+                    except asyncio.QueueFull:
+                        logger.error(
+                            "Send queue full when trying to recover "
+                            "from no connections being available. "
+                            "Dropping data!"
+                        )
 
     def check_socket_type(self):
         assert (
