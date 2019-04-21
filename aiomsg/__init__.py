@@ -379,7 +379,22 @@ class Connection:
         self.heartbeat_timeout = 15
         self.heartbeat_message = b"aiomsg-heartbeat"
 
+    def warn_dropping_data(self):
+        if self.reader_queue.qsize():
+            logger.warning(
+                f"Closing connection {self.identity} but there is"
+                f"still data in the reader_queue: {self.reader_queue.qsize()}\n"
+                f"These messages will be lost."
+            )
+        if self.writer_queue.qsize():
+            logger.warning(
+                f"Closing connection {self.identity} but there is"
+                f"still data in the writer queue: {self.writer_queue.qsize()}\n"
+                f"These messages will be lost."
+            )
+
     async def close(self):
+        self.warn_dropping_data()
         # Kill the reader task
         self.reader_task.cancel()
         self.writer_task.cancel()
@@ -468,4 +483,5 @@ class Connection:
             self.writer_task.cancel()
             group = asyncio.gather(self.reader_task, self.writer_task)
             await group
+            self.warn_dropping_data()
         logger.info(f"Connection {self.identity} no longer active.")
