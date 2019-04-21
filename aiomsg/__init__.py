@@ -445,7 +445,6 @@ class Connection:
                 message = await asyncio.wait_for(
                     self.writer_queue.get(), timeout=self.heartbeat_interval
                 )
-                self.writer_queue.task_done()
             except asyncio.TimeoutError:
                 logger.debug("Sending a heartbeat")
                 message = self.heartbeat_message
@@ -460,6 +459,7 @@ class Connection:
             logger.debug("Got message from connection writer queue.")
             try:
                 await self.send_wait(message)
+                self.writer_queue.task_done()
                 logger.debug("Sent message")
             except asyncio.CancelledError:
                 # Try to still send this message.
