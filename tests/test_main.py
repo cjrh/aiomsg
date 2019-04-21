@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 import uuid
 from collections import defaultdict
 from contextlib import suppress
@@ -270,66 +271,93 @@ def test_identity(loop):
 
             loop.run_until_complete(asyncio.gather(t1, t2))
 
+    print("waiting for everything to finish up")
+    loop.run_until_complete(asyncio.sleep(1))
+
     assert sum(len(v) for v in sends.values()) == size
     assert sum(len(v) for v in receipts.values()) == size
 
     assert sends == receipts
 
 
-@pytest.mark.skip(reason="currently broken")
 def test_client_with_intermittent_server(loop):
     bind_send_mode = SendMode.ROUNDROBIN
-    conn_send_mode = SendMode.PUBLISH
+    conn_send_mode = SendMode.ROUNDROBIN
     message_type = "bytes"
-    value = b"intermittent"
 
     received = []
+    received_by_server = []
+    sent = []
     fut = asyncio.Future()
     PORT = portpicker.pick_unused_port()
+    t0 = time.time()
 
     with conn_sock(send_mode=conn_send_mode, port=PORT) as client:
 
         async def client_recv():
             while True:
-                message = await sock_receiver(message_type, client)
-                print(f"Client received: {message}")
-                if message == b"END":
-                    fut.set_result(1)
-                    print("Client set future")
+                t = loop.create_task(sock_receiver(message_type, client))
+                done, pending = await asyncio.wait(
+                    [t, fut], return_when=asyncio.FIRST_COMPLETED
+                )
+                print("client_recv wait returned")
+                if fut in done:
+                    print("Future is set, leaving")
                     return
 
+                message = t.result()
+                print(f"Client received: {message}")
                 received.append(message)
 
         async def client_send():
+            """This function drives everything, and sets the termination
+            future."""
+            await asyncio.sleep(2.0)
             for i in range(50):
-                print(f"SENDING #{i}")
+                value = f"{i}".encode()
+                print(f"SENDING {value}")
                 await sock_sender(message_type, client, value)
+                sent.append(value)
                 await asyncio.sleep(0.2)
-            print(f"SENDING end")
-            await sock_sender(message_type, client, b"end")
-            print(f"SENT end")
+
+            # Shut it all down given enough time for the server to come
+            # back online and process our message.
+            loop.call_later(1.0, fut.set_result, 1)
 
         loop.create_task(client_recv())
         loop.create_task(client_send())
         count = [0]
 
-        while not fut.done():
+        while not fut.done() and time.time() - t0 < 30:  # Max 60 seconds
             with bind_sock(send_mode=bind_send_mode, port=PORT) as server:
 
                 async def server_recv():
                     while not fut.done():
+                        t = loop.create_task(sock_receiver(message_type, server))
                         try:
-                            message = await sock_receiver(message_type, server)
+                            done, pending = await asyncio.wait(
+                                [t, fut], return_when=asyncio.FIRST_COMPLETED
+                            )
                         except asyncio.CancelledError:
+                            print("Server shutting down")
                             return
+                        else:
+                            if fut in done:
+                                return
 
+                        message = t.result()
+                        print(f"SERVER GOT {message}")
+                        received_by_server.append(message)
                         message = message.decode().upper().encode()
                         count[0] += 1
-                        print(f"SERVER GOT {count}")
                         try:
                             await sock_sender(message_type, server, message)
+                            print(f"SERVER SENT {message}")
                         except asyncio.CancelledError:
+                            print("server cancelled")
                             await sock_sender(message_type, server, message)
+                            print(f"SERVER SENT {message}")
+                            print("server leaving")
                             return
 
                 t = loop.create_task(server_recv())
@@ -339,12 +367,9 @@ def test_client_with_intermittent_server(loop):
             # Server is gone, so client is running here without server
             loop.run_until_complete(asyncio.sleep(0.5))
 
-            # run(fut, timeout=2)
-
     print(received)
-    # assert received
-    # assert len(received) == 1
-    # assert received[0] == value
+    print(sent)
+    assert set(received) == set(sent)
 
 
 def test_connection(loop):
