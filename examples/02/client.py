@@ -1,4 +1,4 @@
-import logging
+import logging, itertools
 import asyncio
 import random
 
@@ -9,7 +9,7 @@ logging.basicConfig(level="DEBUG")
 
 
 async def main():
-    s = aiomsg.SmartSocket()
+    s = aiomsg.SmartSocket(send_mode=aiomsg.SendMode.ROUNDROBIN)
     await s.connect()
 
     async def receiver():
@@ -20,9 +20,9 @@ async def main():
     loop = aiorun.asyncio.get_running_loop()
     loop.create_task(receiver())
 
-    while True:
-        await s.send_string("caleb")
-        await asyncio.sleep(random.randint(0, 30))
+    for i in itertools.count():
+        await s.send_string(f"{i}")
+        await asyncio.sleep(random.randint(0, 30) / 6)
 
 
 aiorun.run(main())
