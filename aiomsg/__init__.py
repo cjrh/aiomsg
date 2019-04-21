@@ -466,6 +466,7 @@ class Connection:
                 # await msgproto.send_msg(self.writer, message)
                 break
         self.writer.close()
+        await self.writer.wait_closed()
 
     async def run(self):
         logger.info(f"Connection {self.identity} running.")
