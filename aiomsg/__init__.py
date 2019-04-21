@@ -405,11 +405,11 @@ class Connection:
     async def _recv(self):
         while True:
             try:
-                print("Waiting for messages in connection")
+                logger.debug("Waiting for messages in connection")
                 message = await asyncio.wait_for(
                     msgproto.read_msg(self.reader), timeout=self.heartbeat_timeout
                 )
-                print(f"Got message in connection: {message}")
+                logger.debug(f"Got message in connection: {message}")
             except asyncio.TimeoutError:
                 logger.warning("Heartbeat failed")
                 self.writer_queue.put_nowait(None)
