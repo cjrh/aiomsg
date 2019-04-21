@@ -5,7 +5,9 @@ import logging
 import pytest
 
 logging.basicConfig(
-    level="DEBUG", format="%(relativeCreated)6d %(levelname)10s %(message)s"
+    level="DEBUG",
+    format='%(relativeCreated)6d %(name)s %(levelname)10s %(message)s %(funcName)s() "%(pathname)s:%(lineno)d"',
+    stream=sys.stdout,
 )
 
 
