@@ -17,15 +17,18 @@ async def read_msg(reader: StreamReader) -> bytes:
     """ Returns b'' if the connection is lost."""
     try:
         size_bytes = await reader.readexactly(_PREFIX_SIZE)
-        size = int.from_bytes(size_bytes, byteorder='big')
+        size = int.from_bytes(size_bytes, byteorder="big")
         data = await reader.readexactly(size)
         return data
-    except IncompleteReadError:
-        logger.info('Connection lost.')
-        return b''
+    except (IncompleteReadError, ConnectionResetError, ConnectionAbortedError) as e:
+        logger.info(f"Connection lost: {e}")
+        return b""
 
 
 async def send_msg(writer: StreamWriter, data: bytes):
-    writer.write(len(data).to_bytes(4, byteorder='big'))
+    writer.write(len(data).to_bytes(4, byteorder="big"))
     writer.write(data)
+    logger.debug(
+        f"Wrote data to the socket: \"{data.decode(errors='backslashreplace')[:50]}\""
+    )
     await writer.drain()
