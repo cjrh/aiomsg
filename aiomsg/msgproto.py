@@ -21,7 +21,12 @@ async def read_msg(reader: StreamReader) -> bytes:
         data = await reader.readexactly(size)
         logger.debug(f'Got data from socket: "{data[:64]}"')
         return data
-    except (IncompleteReadError, ConnectionResetError, ConnectionAbortedError) as e:
+    except (
+        IncompleteReadError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+    ) as e:
         logger.info(f"Connection lost: {e}")
         return b""
 
