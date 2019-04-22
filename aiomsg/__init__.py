@@ -44,8 +44,9 @@ from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import UserDict
 from itertools import cycle
-from typing import Dict, Optional, Tuple, Union, List
+from typing import Dict, Optional, Tuple, Union, List, Callable
 
+from aiomsg import header
 from . import msgproto
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,11 @@ class SendMode(Enum):
 class SocketType(Enum):
     BINDER = auto()
     CONNECTOR = auto()
+
+
+class DeliveryGuarantee(Enum):
+    AT_MOST_ONCE = auto()
+    AT_LEAST_ONCE = auto()
 
 
 class ConnectionsDict(UserDict):
@@ -97,11 +103,13 @@ class SmartSocket:
     def __init__(
         self,
         send_mode: SendMode = SendMode.PUBLISH,
+        delivery_guarantee: DeliveryGuarantee = DeliveryGuarantee.AT_MOST_ONCE,
         receiver_channel: Optional[str] = None,
         identity: Optional[str] = None,
         loop=None,
     ):
         self.send_mode = send_mode
+        self.delivery_guarantee = delivery_guarantee
         self.receiver_channel = receiver_channel
         self.identity = identity or str(uuid.uuid4())
         self.loop = loop or asyncio.get_event_loop()
@@ -114,6 +122,8 @@ class SmartSocket:
         self.socket_type: Optional[SocketType] = None
         self.closed = False
         self.at_least_one_connection = asyncio.Event(loop=self.loop)
+
+        self.waiting_for_acks: Dict[uuid.UUID, asyncio.Handle] = {}
 
         logger.debug("Starting the sender task.")
         # Note this task is started before any connections have been made.
@@ -189,7 +199,7 @@ class SmartSocket:
             identity=identity.decode(),
             reader=reader,
             writer=writer,
-            recv_queue=self._queue_recv,
+            recv_event=self.raw_recv,
         )
         self._connections[connection.identity] = connection
         if len(self._connections) == 1:
@@ -212,6 +222,12 @@ class SmartSocket:
     async def _close(self):
         logger.info(f"Closing {self.identity}")
         self.closed = True
+
+        # REP dict, close all events waiting to fire
+        for msg_id, handle in self.waiting_for_acks.items():
+            logger.debug(f"Cancelling pending resend event for msg_id {msg_id}")
+            handle.cancel()
+
         if self.server:
             # Stop new connections from being accepted.
             self.server.close()
@@ -232,10 +248,78 @@ class SmartSocket:
         except asyncio.TimeoutError:
             logger.exception("Timed out during close:")
 
+    def raw_recv(self, identity: bytes, message: bytes):
+        """Called when *any* active connection receives a message."""
+        logger.debug(f"In raw_recv, identity: {identity} message: {message}")
+        parts = header.parse_header(message)
+        logger.debug(f"{parts}")
+        if not parts.has_header:
+            # Simple case. No request-reply handling, just pass it onto the
+            # application as-is.
+            logger.debug(
+                f"Incoming message has no header, supply as-is: {message[:64]}"
+            )
+            self._queue_recv.put_nowait((identity, message))
+            return
+
+        ######################################################################
+        # The incoming message has a header.
+        #
+        # There are two cases. Let's deal with case 1 first: the received
+        # message is a NEW message (with a header). We must send a reply
+        # back, and pass on the received data to the application.
+        # There is a small catch. We must send the reply back to the
+        # specific connection that sent us this request. No biggie, we
+        # have a method for that.
+        if parts.msg_type == "REQ":
+            reply_parts = header.MessageParts(
+                msg_id=parts.msg_id, msg_type="REP", payload=b""
+            )
+
+            # Make the received data available to the application.
+            logger.debug(f"Writing payload to app: {parts.payload}")
+            self._queue_recv.put_nowait((identity, parts.payload))
+            logger.debug("after self._queue_recv")
+
+            # Send acknowledgement of receipt back to the sender
+
+            def notify_REP():
+                logger.debug(f"Got an REQ, sending back an REP msg_id: {parts.msg_id}")
+                self._user_send_queue.put_nowait(
+                    # BECAUSE the identity is specified here, we are sure to
+                    # send the reply to the specific connection we got the REQ
+                    # from.
+                    (identity, header.make_message(reply_parts))
+                )
+
+            # By deferring this slightly, we hope that the parts.payload
+            # will be made available to the application before the REP is
+            # sent. Otherwise, there's a race condition where we send the
+            # REP *before* parts.payload has been given to the app, and the
+            # app shuts down before being able to do anything with
+            # parts.payload
+            self.loop.call_later(0.02, notify_REP)  # 20 ms
+            return
+
+        # Now we get to the second case. the message we're received here is
+        # a REPLY to a previously sent message. A good thing! All we do is
+        # a little bookkeeping to remove the message id from the "waiting for
+        # acks" dict, and as before, give the received data to the application.
+        logger.debug(f"Got an REP: {parts}")
+        assert parts.msg_type == "REP"  # Nothing else should be possible.
+        handle: asyncio.Handle = self.waiting_for_acks.pop(parts.msg_id, None)
+        logger.debug(f"Looked up call_later handle for {parts.msg_id}: {handle}")
+        if handle:
+            logger.debug(f"Cancelling handle...")
+            handle.cancel()
+            # Nothing further to do. The REP does not go back to the application.
+        ######################################################################
+
     async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
         identity, message = await self._queue_recv.get()
         logger.debug(f"Received message from {identity}: {message}")
+
         return identity, message
 
     async def recv(self) -> bytes:
@@ -252,6 +336,39 @@ class SmartSocket:
 
     async def send(self, data: bytes, identity: Optional[str] = None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
+        original_data = data
+        if self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
+            # Enable receipt acknowldement
+            #####################################################################
+            parts = header.MessageParts(
+                msg_id=uuid.uuid4(), msg_type="REQ", payload=data
+            )
+            rich_data = header.make_message(parts)
+            # TODO: Might want to add a retry counter here somewhere, to keep
+            #  track of repeated failures to send a specific message.
+
+            loop = asyncio.get_running_loop()
+
+            def resend():
+                logger.debug(
+                    f"Scheduling the resend to identity:{identity} for data {original_data}"
+                )
+                loop.create_task(self.send(original_data, identity))
+                # After deleting this here, a new one will be created when
+                # we re-enter ``async def send()``
+                logger.debug(f"Removing the acks entry")
+                del self.waiting_for_acks[parts.msg_id]
+
+            handle: asyncio.Handle = loop.call_later(5.0, resend)
+            # In self.raw_recv(), this handle will be cancelled if the other
+            # side sends back an acknowledgement of receipt (REP)
+            logger.debug("Creating future resend acks entry")
+            self.waiting_for_acks[parts.msg_id] = handle
+            data = rich_data  # In the send further down, send the rich one.
+            #####################################################################
+        else:
+            pass
+
         await self._user_send_queue.put((identity, data))
 
     async def send_string(self, data: str, identity: Optional[str] = None):
@@ -329,22 +446,28 @@ class SmartSocket:
                 return
 
             identity, data = q_task.result()
-            logger.debug(f"Got data to send: {data}")
-            if identity is not None:
-                await self._sender_identity(data, identity)
-            else:
-                try:
-                    await self.sender_handler(message=data)
-                except NoConnectionsAvailableError:
+            logger.debug(f"Got data to send: {data[:64]}")
+            try:
+                if identity is not None:
+                    logger.debug(f"Sending msg via identity {identity}: {data[:64]}")
+                    await self._sender_identity(data, identity)
+                else:
                     try:
-                        # Put it back onto the queue
-                        self._user_send_queue.put_nowait((identity, data))
-                    except asyncio.QueueFull:
-                        logger.error(
-                            "Send queue full when trying to recover "
-                            "from no connections being available. "
-                            "Dropping data!"
-                        )
+                        logger.debug(f"Sending msg via handler: {data[:64]}")
+                        await self.sender_handler(message=data)
+                    except NoConnectionsAvailableError:
+                        logger.error("No connections available")
+                        try:
+                            # Put it back onto the queue
+                            self._user_send_queue.put_nowait((identity, data))
+                        except asyncio.QueueFull:
+                            logger.error(
+                                "Send queue full when trying to recover "
+                                "from no connections being available. "
+                                "Dropping data!"
+                            )
+            except Exception as e:
+                logger.exception(f"Unexpected error when sending a message: {e}")
 
     def check_socket_type(self):
         assert (
@@ -362,7 +485,7 @@ class Connection:
         identity,
         reader: StreamReader,
         writer: StreamWriter,
-        recv_queue: asyncio.Queue,
+        recv_event: Callable[[bytes, bytes], None],
         loop=None,
     ):
         self.loop = loop or asyncio.get_event_loop()
@@ -370,7 +493,7 @@ class Connection:
         self.reader = reader
         self.writer = writer
         self.writer_queue = asyncio.Queue()
-        self.reader_queue = recv_queue
+        self.reader_event = recv_event
 
         self.reader_task: asyncio.Task = None
         self.writer_task: asyncio.Task = None
@@ -380,12 +503,6 @@ class Connection:
         self.heartbeat_message = b"aiomsg-heartbeat"
 
     def warn_dropping_data(self):
-        if self.reader_queue.qsize():
-            logger.warning(
-                f"Closing connection {self.identity} but there is"
-                f"still data in the reader_queue: {self.reader_queue.qsize()}\n"
-                f"These messages will be lost."
-            )
         if self.writer_queue.qsize():
             logger.warning(
                 f"Closing connection {self.identity} but there is"
@@ -428,13 +545,18 @@ class Connection:
                 continue
 
             try:
-                logger.debug(f"Received message on connection: {message}")
-                self.reader_queue.put_nowait((self.identity, message))
-                logger.debug(f"Placed message {message} on reader queue")
+                logger.debug(
+                    f"Received message on connection {self.identity}: {message}"
+                )
+                self.reader_event(self.identity, message)
             except asyncio.QueueFull:
                 logger.error(
-                    "Data lost on connection blah because the recv " "queue is full!"
+                    # TODO: fix message
+                    "Data lost on connection blah because the recv "
+                    "queue is full!"
                 )
+            except Exception as e:
+                logger.exception(f"Unhandled error in _recv: {e}")
 
     async def send_wait(self, message):
         await msgproto.send_msg(self.writer, message)
@@ -442,38 +564,48 @@ class Connection:
     async def _send(self):
         while True:
             try:
-                message = await asyncio.wait_for(
-                    self.writer_queue.get(), timeout=self.heartbeat_interval
-                )
-            except asyncio.TimeoutError:
-                logger.debug("Sending a heartbeat")
-                message = self.heartbeat_message
-            except asyncio.CancelledError:
-                break
+                try:
+                    message = await asyncio.wait_for(
+                        self.writer_queue.get(), timeout=self.heartbeat_interval
+                    )
+                except asyncio.TimeoutError:
+                    logger.debug("Sending a heartbeat")
+                    message = self.heartbeat_message
+                except asyncio.CancelledError:
+                    break
+                else:
+                    self.writer_queue.task_done()
 
-            if not message:
-                logger.info("Connection closed (send)")
-                self.reader_task.cancel()
-                break
+                if not message:
+                    logger.info("Connection closed (send)")
+                    self.reader_task.cancel()
+                    break
 
-            logger.debug("Got message from connection writer queue.")
-            try:
-                await self.send_wait(message)
-                self.writer_queue.task_done()
-                logger.debug("Sent message")
-            except (ConnectionAbortedError, ConnectionResetError) as e:
-                logger.exception(
-                    f"Connection {self.identity} aborted, dropping "
-                    f"message: {message[:50]}...{message[-50:]}\n"
-                    f"error: {e}"
+                logger.debug(
+                    f"Got message from connection writer queue. {message[:64]}"
                 )
-                break
-            except asyncio.CancelledError:
-                # Try to still send this message.
-                # await msgproto.send_msg(self.writer, message)
-                break
-        self.writer.close()
-        await self.writer.wait_closed()
+                try:
+                    await self.send_wait(message)
+                    logger.debug("Sent message")
+                except (ConnectionAbortedError, ConnectionResetError) as e:
+                    logger.exception(
+                        f"Connection {self.identity} aborted, dropping "
+                        f"message: {message[:50]}...{message[-50:]}\n"
+                        f"error: {e}"
+                    )
+                    break
+                except asyncio.CancelledError:
+                    # Try to still send this message.
+                    # await msgproto.send_msg(self.writer, message)
+                    break
+            except Exception as e:
+                logger.error(f"Unhandled error: {e}")
+
+        try:
+            self.writer.close()
+            await self.writer.wait_closed()
+        except Exception as e:
+            logger.error(f"Unhandled error: {e}")
 
     async def run(self):
         logger.info(f"Connection {self.identity} running.")
