@@ -36,6 +36,7 @@ Run tests with watchmedo (available after ``pip install Watchdog`` ):
         -p '*.py'
 
 """
+import sys
 import logging
 import asyncio
 import uuid
@@ -603,7 +604,8 @@ class Connection:
 
         try:
             self.writer.close()
-            await self.writer.wait_closed()
+            if sys.version_info >= (3, 7):
+                await self.writer.wait_closed()
         except Exception as e:
             logger.error(f"Unhandled error: {e}")
 
