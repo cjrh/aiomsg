@@ -45,7 +45,7 @@ from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import UserDict
 from itertools import cycle
-from typing import Dict, Optional, Tuple, Union, List, Callable
+from typing import Dict, Optional, Tuple, Union, List, AsyncGenerator, Callable
 
 from aiomsg import header
 from . import msgproto
@@ -66,7 +66,7 @@ class SendMode(Enum):
     ROUNDROBIN = auto()
 
 
-class SocketType(Enum):
+class ConnectionEnd(Enum):
     BINDER = auto()
     CONNECTOR = auto()
 
@@ -120,7 +120,7 @@ class SmartSocket:
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
-        self.socket_type: Optional[SocketType] = None
+        self.socket_type: Optional[ConnectionEnd] = None
         self.closed = False
         self.at_least_one_connection = asyncio.Event(loop=self.loop)
 
@@ -139,6 +139,9 @@ class SmartSocket:
     async def bind(
         self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
     ):
+        # TODO: I would have made this part of __init__, but alas this
+        #  has to be an ``async def`` function, and __init__ has to
+        #  be a ``def`` function.
         self.check_socket_type()
         logger.info(f"Binding socket {self.identity} to {hostname}:{port}")
         coro = asyncio.start_server(
@@ -146,6 +149,7 @@ class SmartSocket:
         )
         self.server = await coro
         logger.info("Server started.")
+        return self
 
     async def connect(
         self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
@@ -174,6 +178,28 @@ class SmartSocket:
                 logger.info("Connection dropped, reconnecting.")
 
         self.loop.create_task(connect_with_retry())
+        return self
+
+    async def messages(self) -> AsyncGenerator[bytes, None]:
+        """Convenience method to make it a little easier to get started
+        with basic, reactive sockets. This method is intended to be
+        consumed with ``async for``, like this:
+
+        .. code-block: python3
+
+            import asyncio
+            from aiomsg import SmartSock
+
+            async def main(addr: str):
+                async for msg in SmartSock().bind(addr).messages():
+                    print(f'Got a message: {msg}')
+
+            asyncio.run(main('localhost:8080'))
+
+        (This is a complete program btw!)
+        """
+        while True:
+            yield await self.recv()
 
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
         """Each new connection will create a task with this coroutine."""
@@ -474,6 +500,12 @@ class SmartSocket:
         assert (
             self.socket_type is None
         ), f"Socket type has already been set: {self.socket_type}"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
 
 class HeartBeatFailed(ConnectionError):

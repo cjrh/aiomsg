@@ -31,10 +31,16 @@ aiomsg
 
 Pure-Python smart sockets (like ZMQ) for simple microservices architecture
 
-.. WARNING::
+.. warning::
     ⚠️ Don't use this! Use `ZeroMQ <https://pyzmq.readthedocs.io/en/latest/>`_
     instead. ``aiomsg`` is currently a hobby project, whereas ZeroMQ is a mature
     messaging library that has been battle-tested for well over a decade!
+
+.. warning::
+    ⚠️ Right now this is in ALPHA. I'm changing stuff all the time. Don't
+    depend on this library unless you can handle API breakage between
+    releases. Your semver has no power here, this is calver country.
+    When I'm happy with the API I'll remove this wraning.
 
 Demo
 ----
