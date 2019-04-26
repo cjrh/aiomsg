@@ -18,7 +18,7 @@ import pytest
 from tests.utils import run, bind_sock, conn_sock, sock_receiver, sock_sender
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def ssl_contexts():
     name = str(uuid.uuid4().hex)
     cert_filename = f"{name}.crt"
