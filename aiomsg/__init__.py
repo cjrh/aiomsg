@@ -501,6 +501,12 @@ class SmartSocket:
             self.socket_type is None
         ), f"Socket type has already been set: {self.socket_type}"
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
 
 class HeartBeatFailed(ConnectionError):
     pass
