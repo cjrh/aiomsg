@@ -3,7 +3,7 @@ import aiorun
 
 
 async def main():
-    s = aiomsg.SmartSocket(send_mode=aiomsg.SendMode.ROUNDROBIN)
+    s = aiomsg.Søcket(send_mode=aiomsg.SendMode.ROUNDROBIN)
     await s.bind()
     while True:
         msg = await s.recv_string()

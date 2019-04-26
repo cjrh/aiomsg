@@ -9,7 +9,7 @@ logging.basicConfig(level="DEBUG")
 
 
 async def main():
-    s = aiomsg.SmartSocket(send_mode=aiomsg.SendMode.ROUNDROBIN)
+    s = aiomsg.Søcket(send_mode=aiomsg.SendMode.ROUNDROBIN)
     await s.connect()
 
     async def receiver():

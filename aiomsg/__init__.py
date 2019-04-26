@@ -100,7 +100,7 @@ class ConnectionsDict(UserDict):
             raise NoConnectionsAvailableError
 
 
-class SmartSocket:
+class Søcket:
     def __init__(
         self,
         send_mode: SendMode = SendMode.PUBLISH,
