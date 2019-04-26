@@ -4,7 +4,7 @@ import time
 import uuid
 from collections import defaultdict
 from contextlib import suppress
-from random import choice
+from random import choice, uniform
 from uuid import uuid4
 import subprocess as sp
 import shlex
@@ -280,8 +280,52 @@ def test_identity(loop):
     assert sends == receipts
 
 
-@pytest.mark.skip(reason="currently broken")
+@pytest.mark.xpass
 def test_client_with_intermittent_server(loop):
+    """This is a somewhat cruel stress test for dropped messages.
+
+    1. Client sends msg to a server
+    2. Server sends same msg back to client
+    3. We compare the list of what the client originally sent, and what
+       it got back.
+
+    The server is continually killed and restart  at random times
+    throughout the test. This makes it quite hard to guarantee delivery,
+    this is why the test is cruel.
+
+    Under these conditions, the messages have to both make it to the
+    server successfully AND back from the server to the client.
+
+    Internally, aiomsg is actually doing receipt
+    acknowledgement. When the client sends a message to the server,
+    it waits for a receipt. (the application-facing code, what you see
+    below, is not aware of these "receipt" messages). If the client
+    doesn't receive an acknowledgement within some timeframe, it pretty
+    much just sends the original message again.  That's the strategy.
+
+    There is a race though; the client can successfully give a message
+    to the server, AND receive a valid acknowledgement, but the server
+    could fail to send the message back to the client. That's just an
+    unfortunate side-effect of how the test was constructed below.
+
+    To make the whole system more reliable, it would be better to save
+    the message into persistent storage, and only once that is done,
+    send the receipt acknowledgement. That way, a service could be
+    shut down at any time, and pick up where it left off by reading
+    state back from the persistent storage. But we don't have anything
+    like that in aiomsg yet.
+
+    TODO: This is a not a good way to test this. server and client should
+     be running a separate processes.  Weird things happen because the
+     event loop is persistent, while the server comes and goes.
+
+    TODO: Another version of this test with multiple clients.
+
+    TODO: Do we want this delivery guarantee thing to also apply to
+     the PUBLISH send mode?
+
+    TODO: Include SSL
+    """
     bind_send_mode = SendMode.ROUNDROBIN
     conn_send_mode = SendMode.ROUNDROBIN
     message_type = "bytes"
@@ -293,7 +337,11 @@ def test_client_with_intermittent_server(loop):
     PORT = portpicker.pick_unused_port()
     t0 = time.time()
 
-    with conn_sock(send_mode=conn_send_mode, port=PORT) as client:
+    with conn_sock(
+        send_mode=conn_send_mode,
+        port=PORT,
+        delivery_guarantee=aiomsg.DeliveryGuarantee.AT_LEAST_ONCE,
+    ) as client:
 
         async def client_recv():
             while True:
@@ -301,36 +349,38 @@ def test_client_with_intermittent_server(loop):
                 done, pending = await asyncio.wait(
                     [t, fut], return_when=asyncio.FIRST_COMPLETED
                 )
-                print("client_recv wait returned")
                 if fut in done:
-                    print("Future is set, leaving")
                     return
 
                 message = t.result()
-                print(f"Client received: {message}")
+                print(f"CLIENT GOT: {message}")
                 received.append(message)
 
         async def client_send():
             """This function drives everything, and sets the termination
             future."""
             await asyncio.sleep(2.0)
-            for i in range(50):
+            for i in range(100):
                 value = f"{i}".encode()
-                print(f"SENDING {value}")
+                print(f"CLIENT SENT: {value}")
                 await sock_sender(message_type, client, value)
                 sent.append(value)
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(uniform(0, 1))
 
             # Shut it all down given enough time for the server to come
             # back online and process our message.
-            loop.call_later(1.0, fut.set_result, 1)
+            loop.call_later(5.0, fut.set_result, 1)
 
         loop.create_task(client_recv())
         loop.create_task(client_send())
         count = [0]
 
-        while not fut.done() and time.time() - t0 < 30:  # Max 60 seconds
-            with bind_sock(send_mode=bind_send_mode, port=PORT) as server:
+        while not fut.done() and time.time() - t0 < 90:  # Max 60 seconds
+            with bind_sock(
+                send_mode=bind_send_mode,
+                port=PORT,
+                delivery_guarantee=aiomsg.DeliveryGuarantee.AT_LEAST_ONCE,
+            ) as server:
 
                 async def server_recv():
                     while not fut.done():
@@ -362,12 +412,14 @@ def test_client_with_intermittent_server(loop):
                             return
 
                 t = loop.create_task(server_recv())
-                loop.call_later(3.0, t.cancel)
+                loop.call_later(uniform(1, 3), t.cancel)
                 loop.run_until_complete(t)
 
             # Server is gone, so client is running here without server
-            loop.run_until_complete(asyncio.sleep(0.5))
+            loop.run_until_complete(asyncio.sleep(uniform(0.5, 3.0)))
 
+    print("GIVE A CHANCE TO FINISH")
+    loop.run_until_complete(asyncio.sleep(5.0))
     print(received)
     print(sent)
     assert set(received) == set(sent)
@@ -415,13 +467,17 @@ def test_connection(loop):
     srv_task = loop.create_task(srv())
     # Wait a bit, let the server come up
     run(asyncio.sleep(0.5))
-    q = asyncio.Queue()
+
+    received = []
+
+    def recv_event(identity: bytes, data: bytes):
+        received.append((identity, data))
 
     async def client():
         reader, writer = await asyncio.open_connection(host="127.0.0.1", port=PORT)
 
         c = aiomsg.Connection(
-            identity=str(uuid4()), reader=reader, writer=writer, recv_queue=q
+            identity=str(uuid4()), reader=reader, writer=writer, recv_event=recv_event
         )
 
         cln_task = loop.create_task(c.run())
@@ -439,6 +495,4 @@ def test_connection(loop):
     run(srv_task)
     assert srv_task.done()
 
-    print(f"q size: {q.qsize()}")
-    while not q.empty():
-        print(q.get_nowait())
+    print(f"received: {received}")

@@ -22,7 +22,6 @@ def new_sock(*args, **kwargs) -> SmartSocket:
     try:
         yield sock
     finally:
-        print("CLOSING SOCK")
         run(sock.close())
 
 
