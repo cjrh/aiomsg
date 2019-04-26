@@ -519,3 +519,52 @@ def test_connection(loop):
     assert srv_task.done()
 
     print(f"received: {received}")
+
+
+@pytest.mark.parametrize("bind_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize("conn_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
+@pytest.mark.parametrize("ssl_enabled", [False, True])
+def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled):
+    """One server, one client, echo server"""
+
+    ctx_bind, ctx_connect = None, None
+    if ssl_enabled:
+        ctx_bind, ctx_connect = ssl_contexts
+
+    sent = []
+    received = []
+    fut = asyncio.Future()
+    PORT = portpicker.pick_unused_port()
+
+    with bind_sock(send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind) as server:
+
+        async def server_recv():
+            for i in range(10):
+                value = f"{i}".encode()
+                await sock_sender("bytes", server, value)
+                sent.append(value)
+            await asyncio.sleep(0.5)
+            fut.set_result(1)
+
+        loop.create_task(server_recv())
+
+        async def client_recv():
+            # 1. Context manager for the socket
+            async with aiomsg.SmartSocket(send_mode=conn_send_mode) as s:
+                # 2. Gotta do the connect call
+                await s.connect(port=PORT, ssl_context=ctx_connect)
+                # 3. async for to get the received messages one by one.
+                async for msg in s.messages():
+                    received.append(msg)
+                    print(f"Client received: {msg}")
+
+        t = loop.create_task(client_recv())
+
+        run(fut, timeout=2)
+
+    t.cancel()
+    loop.create_task(server.close())
+    with suppress(asyncio.CancelledError):
+        loop.run_until_complete(t)
+
+    assert received == sent
