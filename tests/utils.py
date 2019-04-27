@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import contextmanager
 
-from aiomsg import SmartSocket
+from aiomsg import Søcket
 
 
 def run(coro, timeout=1000):
@@ -17,8 +17,8 @@ def run(coro, timeout=1000):
 
 
 @contextmanager
-def new_sock(*args, **kwargs) -> SmartSocket:
-    sock = SmartSocket(*args, **kwargs)
+def new_sock(*args, **kwargs) -> Søcket:
+    sock = Søcket(*args, **kwargs)
     try:
         yield sock
     finally:
@@ -26,20 +26,20 @@ def new_sock(*args, **kwargs) -> SmartSocket:
 
 
 @contextmanager
-def bind_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> SmartSocket:
+def bind_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Søcket:
     with new_sock(**kwargs) as sock:
         run(sock.bind(host, port, ssl_context=ssl_context))
         yield sock
 
 
 @contextmanager
-def conn_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> SmartSocket:
+def conn_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Søcket:
     with new_sock(**kwargs) as sock:
         run(sock.connect(host, port, ssl_context=ssl_context))
         yield sock
 
 
-async def sock_receiver(message_type: str, sock: SmartSocket):
+async def sock_receiver(message_type: str, sock: Søcket):
     if message_type == "bytes":
         message = await sock.recv()
     elif message_type == "str":
@@ -52,7 +52,7 @@ async def sock_receiver(message_type: str, sock: SmartSocket):
     return message
 
 
-async def sock_sender(message_type: str, sock: SmartSocket, data):
+async def sock_sender(message_type: str, sock: Søcket, data):
     if message_type == "bytes":
         assert isinstance(data, bytes)
         await sock.send(data)

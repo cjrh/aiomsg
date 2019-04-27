@@ -3,7 +3,7 @@ import aiorun
 
 
 async def main():
-    s = aiomsg.SmartSocket(
+    s = aiomsg.Søcket(
         send_mode=aiomsg.SendMode.ROUNDROBIN,
         delivery_guarantee=aiomsg.DeliveryGuarantee.AT_LEAST_ONCE,
     )

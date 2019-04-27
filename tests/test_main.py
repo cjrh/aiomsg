@@ -11,7 +11,7 @@ import shlex
 import ssl
 
 import aiomsg
-from aiomsg import SmartSocket, SendMode
+from aiomsg import Søcket, SendMode
 import portpicker
 import pytest
 
@@ -170,7 +170,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     port = portpicker.pick_unused_port()
 
     async def srv():
-        server = SmartSocket()
+        server = Søcket()
         await server.bind("127.0.0.1", port, ssl_context=ctx_bind)
         try:
             while True:
@@ -189,7 +189,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         clients = []
 
         async def cnt():
-            client = SmartSocket()
+            client = Søcket()
             clients.append(client)
             await client.connect("127.0.0.1", port, ssl_context=ctx_connect)
 
@@ -550,7 +550,7 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
 
         async def client_recv():
             # 1. Context manager for the socket
-            async with aiomsg.SmartSocket(send_mode=conn_send_mode) as s:
+            async with aiomsg.Søcket(send_mode=conn_send_mode) as s:
                 # 2. Gotta do the connect call
                 await s.connect(port=PORT, ssl_context=ctx_connect)
                 # 3. async for to get the received messages one by one.

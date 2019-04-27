@@ -45,48 +45,44 @@ Pure-Python smart sockets (like ZMQ) for simple microservices architecture
 Demo
 ----
 
+Let's make two microservices; one will send the current time to the other.
 Here's the end that binds to a port (a.k.a, the "server"):
 
 .. code-block:: python3
 
-    import asyncio
-    from aiomsg import SmartSocket
+    import asyncio, time
+    from aiomsg import Søcket
 
     async def main():
-        sock = SmartSocket()
-        await sock.bind('127.0.0.1', 25000)
-        while True:
-            message = await sock.recv()
-            print(f'sock received {message}')
-            # Echo - but don't hold up recv to do it!
-            loop.create_task(sock.send(message))
+        async with Søcket().bind('127.0.0.1', 25000) as s:
+            while True:
+                await s.send(time.ctime().encode())
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
-Here is the end that does the connecting (a.k.a, the "client"):
+Running as a different process, here is the end that does the
+connecting (a.k.a, the "client"):
 
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     async def main():
-        sock = SmartSocket()
-        await sock.connect('127.0.0.1', 25000)
+        async with Søcket().connect('127.0.0.1', 25000) as s:
+            async for msg in s.recv():
+                print(msg.decode())
 
-        async def receiver():
-            message = await sock.recv()
-            print(f'sock received {message}')
+    asyncio.run(main())
 
-        loop.create_task(receiver())
+Note that these are both complete, runnable programs, not fragments.
 
-        while True:
-            await sock.send(b'hi!')
-            await asyncio.sleep(1)
+Looks a lot like conventional socket programming, except that *these*
+sockets have a few extra tricks. These are described in more detail
+further down in rest of this document.
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+Inspiration
+-----------
 
 Looks a lot like ZeroMQ, yes? no? Well if you don't know anything about
 ZeroMQ, that's fine too. The rest of this document will assume that you
@@ -95,11 +91,12 @@ modelled after ZeroMQ, to the point of being an almost-clone in the
 general feature set.
 
 There are some differences; hopefully they make things simpler than zmq.
-
 For instance, we don't have special kinds of sockets. There is only the
-``SmartSocket``. The only role distinction you must make between different
+``Søcket``. The only role distinction you must make between different
 socket instances is this: some sockets will **bind** and others will
-**connect**. This is the leaky part of the API that comes from the
+**connect**.
+
+This is the leaky part of the API that comes from the
 underlying BSD socket API. A *bind* socket will bind to a local interface
 and port. A *connect* socket must connect to a *bind* socket, which can
 be on the same machine or a remote machine. This is the only complicated
@@ -108,10 +105,6 @@ which sockets must bind and which must connect. A useful heuristic is
 that the service which is more likely to require horizontal scaling should
 have the *connect* sockets. This is because the *hostnames* to which they
 will connect (these will be the *bind* sockets) will be long-lived.
-
-Something else to pay attention to in the examples above: always make
-sure you send and receive in different tasks. This one, simple rule
-will make your async life much, much easier.
 
 Introduction
 ------------
@@ -131,7 +124,9 @@ back together on the other side.
 
 The connecting end will automatically reconnect. You don't have to
 write special code for it. If the bind end (a.k.a "server") is restarted,
-the connecting end will automatically reconnect
+the connecting end will automatically reconnect. This works in either
+direction.  Try it! run the demo code and kill one of the processes.
+And then start it up again. The connection will get re-established.
 
 - *Many connections on a single socket*
 
@@ -139,18 +134,11 @@ The bind end can receive multiple connections, but you do all your
 ``.send()`` and ``.recv()`` calls on a single object. (No
 callback handlers or protocol objects.)
 
-The connecting end is very similar; it can connect to multiple bind ends,
-but you do all your ``send()`` and ``recv()`` calls on a single object.
-This allows the connecting end to behave kind-of like a "server" in
-certain configurations.
+Surprisingly, the connecting end is exactly the same; it can make an
+outgoing connect call to multiple peers (bind sockets),
+and you make all your ``send()`` and ``recv()`` calls on a single object.
 
-- *Built-in heartbeating*
-
-Because ain't nobody got time to mess around with TCP keepalive
-settings. The heartbeating is internal and opaque to your application
-code. You won't even know it's happening, unless you enable debug
-logs. Heartbeats are sent only during periods of inactivity, so
-they won't interfere with your application messages.
+This will be described in more detail further on in this document.
 
 - *Message distribution*
 
@@ -161,12 +149,35 @@ are:
 - Pub-sub: each connection gets a copy
 - Round-robin: each connection gets a *unique* message; the messages
   are distributed to each connection in a circular pattern.
-- By name: you can also send to a specific connection by using
+- By name: you can also send to a specific peer by using
   its identity (this is how to emulate the *DEALER-ROUTER* socket
   pair in ZeroMQ).
 
+This will be described in more detail further on in this document.
+
+- *Built-in heartbeating*
+
+Because ain't nobody got time to mess around with TCP keepalive
+settings. The heartbeating is internal and opaque to your application
+code. You won't even know it's happening, unless you enable debug
+logs. Heartbeats are sent only during periods of inactivity, so
+they won't interfere with your application messages.
+
+You really shouldn't need heartbeating, since TCP is a very robust
+protocol; but in practice, various intermediate servers and routers
+sometimes do silly things to your connection if they think a connection
+has been idle for too long. So, automatic heartbeating is baked in to
+let everyone know you want the connection to stay up, and if the connection
+goes down, you will know much sooner than the standard TCP keepalive
+timeout duration (which can be very long!).
+
 Scenarios
 ---------
+
+The message distribution patterns are what make ``aiomsg`` powerful. It
+is the way you connect up a whole bunch of microservices that brings the
+greatest leverage. We'll go through the different scenarios using a
+cookbook format.
 
 Publish-subscribe (PUBSUB)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -178,27 +189,26 @@ message to *all* connected peers):
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket, SendMode
+    from aiomsg import Søcket, SendMode
 
     async def main():
-        sock = SmartSocket(send_mode=SendMode.PUBLISH)
+        sock = Søcket(send_mode=SendMode.PUBLISH)
         await sock.bind('127.0.0.1', 25000)
         while True:
             await sock.send(b'News!')
             await asyncio.sleep(1)
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
 10 subscribers:
 
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     async def sub():
-        sock = SmartSocket()
+        sock = Søcket()
         await sock.connect('127.0.0.1', 25000)
         while True:
             message = await sock.recv()
@@ -217,32 +227,31 @@ end, and 10 *bind* sockets as the SUB listeners:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     ports = range(25000, 25010)
 
     async def main():
-        sock = SmartSocket(send_mode=SendMode.PUBLISH)
+        sock = Søcket(send_mode=SendMode.PUBLISH)
         for port in ports:   # <---- Must connect to each bind address
             await sock.connect('127.0.0.1', port)
         while True:
             await sock.send(b'News!')
             await asyncio.sleep(1)
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
 10 subscribers:
 
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     ports = range(25000, 25010)
 
     async def sub(port):
-        sock = SmartSocket()
+        sock = Søcket()
         await sock.bind('127.0.0.1', port)
         while True:
             message = await sock.recv()
@@ -278,10 +287,10 @@ the PUBSUB example earlier, except that the "send mode" is changed:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket, SendMode
+    from aiomsg import Søcket, SendMode
 
     async def main():
-        sock = SmartSocket(send_mode=SendMode.ROUNDROBIN)
+        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
         await sock.bind('127.0.0.1', 25000)
         counter = 0
         while True:
@@ -289,8 +298,7 @@ the PUBSUB example earlier, except that the "send mode" is changed:
             counter += 1
             await asyncio.sleep(1)
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
 The 10 connect sockets below, despite the code being exactly identical
 to the PUBSUB example further up, will all receive different job numbers,
@@ -299,10 +307,10 @@ as a way of showing how work can be spread across a group of peers:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     async def sub():
-        sock = SmartSocket()
+        sock = Søcket()
         await sock.connect('127.0.0.1', 25000)
         while True:
             message = await sock.recv()
@@ -318,13 +326,13 @@ and connecting ends:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     ports = range(25000, 25010)
 
     async def main():
         #                   This is different |(here)
-        sock = SmartSocket(send_mode=SendMode.ROUNDROBIN)
+        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
         for port in ports:   # <---- Must connect to each bind address
             await sock.connect('127.0.0.1', port)
         counter = 0
@@ -333,20 +341,19 @@ and connecting ends:
             counter += 1
             await asyncio.sleep(1)
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
 10 workers with *bind* sockets. Each one will get a unique job message:
 
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     ports = range(25000, 25010)
 
     async def sub(port):
-        sock = SmartSocket()
+        sock = Søcket()
         await sock.bind('127.0.0.1', port)
         while True:
             message = await sock.recv()
@@ -370,10 +377,10 @@ send-mode either:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket, SendMode
+    from aiomsg import Søcket, SendMode
 
     async def main():
-        sock = SmartSocket(send_mode=SendMode.ROUNDROBIN)
+        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
         await sock.bind('127.0.0.1', 25000)
         counter = 0
         while True:
@@ -391,8 +398,7 @@ send-mode either:
                 )
             counter += 1
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    asyncio.run(main())
 
 The snipped above is an example where a peer tells you when they are
 ready for more work. This is a pretty useful pattern.
@@ -402,10 +408,10 @@ The corresponding peer code is straightforward:
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import SmartSocket
+    from aiomsg import Søcket
 
     async def sub():
-        sock = SmartSocket()
+        sock = Søcket()
         await sock.connect('127.0.0.1', 25000)
         # You need to ask for work to kick things off!
         await sock.send(b'Ready for work')
