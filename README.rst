@@ -102,10 +102,13 @@ modelled after ZeroMQ, to the point of being an almost-clone in the
 general feature set.
 
 There are some differences; hopefully they make things simpler than zmq.
-For instance, we don't have special kinds of sockets. There is only the
-``Søcket``. The only role distinction you must make between different
-socket instances is this: some sockets will **bind** and others will
-**connect**.
+For one thing, *aiomsg* is pure-python so no compilation step is required,
+and relies only on the Python standard library (and that won't change).
+
+Also, we don't have special kinds of socket pairs like ZeroMQ has. There is
+only the one ``Søcket`` class. The only role distinction you need to make
+between different socket instances is this: some sockets will **bind**
+and others will **connect**.
 
 This is the leaky part of the API that comes from the
 underlying BSD socket API. A *bind* socket will bind to a local interface
@@ -124,14 +127,16 @@ What you see above in the demo is pretty much a typical usage of
 network sockets. So what's special about ``aiomsg``? These are
 the high-level features:
 
-- *Messages, not streams*
+Messages, not streams
+^^^^^^^^^^^^^^^^^^^^^
 
 Send and receive are *message-based*, not stream based. Much easier! This
 does mean that if you want to transmit large amounts of data, you're going
 to have have to break them up yourself, send the pieces, and put them
 back together on the other side.
 
-- *Automatic reconnection*
+Automatic reconnection
+^^^^^^^^^^^^^^^^^^^^^^
 
 These sockets automatically reconnect. You don't have to
 write special code for it. If the bind end (a.k.a "server") is restarted,
@@ -139,34 +144,36 @@ the connecting end will automatically reconnect. This works in either
 direction.  Try it! run the demo code and kill one of the processes.
 And then start it up again. The connection will get re-established.
 
-- *Many connections on a single socket*
+Many connections on a single socket
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The bind end can receive multiple connections, but you do all your
 ``.send()`` and ``.recv()`` calls on a single object. (No
 callback handlers or protocol objects.)
 
-Surprisingly, the connecting end is exactly the same; it can make an
-outgoing connect call to multiple peers (bind sockets),
+More impressive is that the connecting end is exactly the same; it can make
+outgoing ``connect()`` calls to multiple peers (bind sockets),
 and you make all your ``send()`` and ``recv()`` calls on a single object.
 
 This will be described in more detail further on in this document.
 
-- *Message distribution*
+Message distribution patterns
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For ``send()``, you can configure the socket to distribute messages
 to all the connections in various ways. The three standard options
 are:
 
-- Pub-sub: each connection gets a copy
-- Round-robin: each connection gets a *unique* message; the messages
+- **Pub-sub**: each connected peer gets a copy
+- **Round-robin**: each connected peer gets a *unique* message; the messages
   are distributed to each connection in a circular pattern.
-- By name: you can also send to a specific peer by using
-  its identity (this is how to emulate the *DEALER-ROUTER* socket
-  pair in ZeroMQ).
+- **By peer identity**: you can also send to a specific peer by using
+  its identity.
 
 This will be described in more detail further on in this document.
 
-- *Built-in heartbeating*
+Built-in heartbeating
+^^^^^^^^^^^^^^^^^^^^^
 
 Because ain't nobody got time to mess around with TCP keepalive
 settings. The heartbeating is internal and opaque to your application

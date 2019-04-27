@@ -1,0 +1,77 @@
+digraph G {
+    overlap = scale;
+    graph [fontname = "sans-serif"];
+    node [fontname = "sans-serif"];
+    edge [fontname = "sans-serif"];
+    /* node [shape = box]; */
+
+    subgraph cluster00 {
+        node [style=filled,color=white];
+        style=filled;
+        color=lightgrey;
+        w0;
+        w1;
+        w2;
+        w3;
+        w4;
+        w5;
+        w6;
+        w7;
+        label = "browser";
+    }
+
+    subgraph cluster0 {
+        node [style=filled,color=white];
+        style=filled;
+        color=lightgrey;
+        fanoutb [style=filled,fillcolor=white,color=red];
+        fanoutb -> b0;
+        fanoutb -> b1;
+        label = "billing";
+    }
+
+    subgraph cluster1 {
+        node [style=filled,color=white];
+        style=filled;
+        color=lightgrey;
+        fanoutc -> c0;
+        fanoutc -> c1;
+        label = "customers"
+    }
+
+    subgraph cluster2 {
+        node [style=filled,color=white];
+        style=filled;
+        color=lightgrey;
+        fanouts -> s0;
+        fanouts -> s1;
+        label = "shipping"
+    }
+
+    subgraph cluster3 {
+        node [style=filled,color=white];
+        style=filled;
+        color=lightgrey;
+        l0 [label="logging"];
+        l1 [label="logging"];
+        l2 [label="logging"];
+        label = "logging shards"
+    }
+
+    b0 -> fanouts;
+    b1 -> fanouts;
+
+    c0 -> fanoutb;
+    c1 -> fanoutb;
+
+    b0 -> {l0 l1 l2} [color=grey];
+    b1 -> {l0 l1 l2} [color=grey];
+
+    c0 -> {l0 l1 l2} [color=grey];
+    c1 -> {l0 l1 l2} [color=grey];
+
+    s0 -> {l0 l1 l2} [color=grey];
+    s1 -> {l0 l1 l2} [color=grey];
+
+    {w0 w1 w2 w3 w4 w5 w6 w7} -> fanoutc;
+}
