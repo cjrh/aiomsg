@@ -429,7 +429,8 @@ The corresponding peer code is straightforward:
 FAQ
 ---
 
-**Why do you spell ``Søcket`` like that?**
+Why do you spell ``Søcket`` like that?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The slashed O is used in homage to `ØMQ <http://zeromq.org/>`_, a truly
 wonderful library that changed my thinking around what socket programming
