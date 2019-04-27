@@ -189,8 +189,8 @@ let everyone know you want the connection to stay up, and if the connection
 goes down, you will know much sooner than the standard TCP keepalive
 timeout duration (which can be very long!).
 
-Scenarios
----------
+Cookbook
+--------
 
 The message distribution patterns are what make ``aiomsg`` powerful. It
 is the way you connect up a whole bunch of microservices that brings the

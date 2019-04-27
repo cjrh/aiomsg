@@ -9,6 +9,7 @@ logging.basicConfig(
     format='%(relativeCreated)6d  %(funcName)20s() %(name)s %(levelname)10s %(message)s "%(pathname)s:%(lineno)d"',
     stream=sys.stdout,
 )
+logging.getLogger("asyncio").setLevel("DEBUG")
 
 
 @pytest.fixture
