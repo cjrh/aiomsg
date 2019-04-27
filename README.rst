@@ -122,7 +122,7 @@ back together on the other side.
 
 - *Automatic reconnection*
 
-The connecting end will automatically reconnect. You don't have to
+These sockets automatically reconnect. You don't have to
 write special code for it. If the bind end (a.k.a "server") is restarted,
 the connecting end will automatically reconnect. This works in either
 direction.  Try it! run the demo code and kill one of the processes.
@@ -425,3 +425,13 @@ The corresponding peer code is straightforward:
     loop = asyncio.get_event_loop()
     listeners = [loop.create_task(sub()) for _ in range(10)
     loop.run_until_complete(asyncio.gather(*listeners))
+
+FAQ
+---
+
+**Why do you spell ``Søcket`` like that?**
+
+The slashed O is used in homage to `ØMQ <http://zeromq.org/>`_, a truly
+wonderful library that changed my thinking around what socket programming
+could be like. Why would you use HTTP between backend systems when you
+could use this!
