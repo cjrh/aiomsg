@@ -70,7 +70,7 @@ connecting (a.k.a, the "client"):
 
     async def main():
         async with Søcket().connect('127.0.0.1', 25000) as s:
-            async for msg in s.recv():
+            async for msg in s.messages():
                 print(msg.decode())
 
     asyncio.run(main())
