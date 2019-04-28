@@ -282,7 +282,7 @@ class Søcket:
         self.sender_task.cancel()
         await self.sender_task
 
-        results = await asyncio.gather(
+        await asyncio.gather(
             *(c.close() for c in self._connections.values()), return_exceptions=True
         )
 
@@ -334,7 +334,7 @@ class Søcket:
 
             # Send acknowledgement of receipt back to the sender
 
-            def notify_REP():
+            def notify_rep():
                 logger.debug(f"Got an REQ, sending back an REP msg_id: {parts.msg_id}")
                 self._user_send_queue.put_nowait(
                     # BECAUSE the identity is specified here, we are sure to
@@ -349,7 +349,7 @@ class Søcket:
             # REP *before* parts.payload has been given to the app, and the
             # app shuts down before being able to do anything with
             # parts.payload
-            self.loop.call_later(0.02, notify_REP)  # 20 ms
+            self.loop.call_later(0.02, notify_rep)  # 20 ms
             return
 
         # Now we get to the second case. the message we're received here is
@@ -389,7 +389,7 @@ class Søcket:
         logger.debug(f"Adding message to user queue: {data[:20]}")
         original_data = data
         if self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
-            # Enable receipt acknowldement
+            # Enable receipt acknowledgement
             #####################################################################
             parts = header.MessageParts(
                 msg_id=uuid.uuid4(), msg_type="REQ", payload=data
@@ -397,8 +397,6 @@ class Søcket:
             rich_data = header.make_message(parts)
             # TODO: Might want to add a retry counter here somewhere, to keep
             #  track of repeated failures to send a specific message.
-
-            loop = asyncio.get_running_loop()
 
             def resend(retries):
                 if retries == 0:
@@ -410,13 +408,15 @@ class Søcket:
                 logger.debug(
                     f"Scheduling the resend to identity:{identity} for data {original_data}"
                 )
-                self._tasks.add(loop.create_task(self.send(original_data, identity)))
+                self._tasks.add(
+                    self.loop.create_task(self.send(original_data, identity))
+                )
                 # After deleting this here, a new one will be created when
                 # we re-enter ``async def send()``
                 logger.debug(f"Removing the acks entry")
                 del self.waiting_for_acks[parts.msg_id]
 
-            handle: asyncio.Handle = loop.call_later(
+            handle: asyncio.Handle = self.loop.call_later(
                 5.0, resend, 5 if retries is None else retries - 1
             )
             # In self.raw_recv(), this handle will be cancelled if the other
@@ -492,9 +492,7 @@ class Søcket:
                 self.at_least_one_connection.wait()
             )
             try:
-                done, pending = await asyncio.wait(
-                    [w_task, q_task], return_when=asyncio.ALL_COMPLETED
-                )
+                await asyncio.wait([w_task, q_task], return_when=asyncio.ALL_COMPLETED)
             except asyncio.CancelledError:
                 q_task.cancel()
                 w_task.cancel()
@@ -665,6 +663,7 @@ class Connection:
         try:
             self.writer.close()
             if sys.version_info >= (3, 7):
+                # noinspection PyUnresolvedReferences
                 await self.writer.wait_closed()
         except Exception as e:
             logger.error(f"Unhandled error: {e}")
@@ -675,7 +674,7 @@ class Connection:
         self.writer_task = self.loop.create_task(self._send())
 
         try:
-            done, pending = await asyncio.wait(
+            await asyncio.wait(
                 [self.reader_task, self.writer_task],
                 loop=self.loop,
                 return_when=asyncio.ALL_COMPLETED,

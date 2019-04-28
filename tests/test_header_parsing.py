@@ -59,7 +59,8 @@ def test_header(msg, msg_id, msg_type, payload, payload_suffix_size):
     assert payload == d["payload"]
 
     if msg_id:
-        received_uuid = uuid.UUID(bytes=msg_id)
+        # Verify it's a valid UUID
+        uuid.UUID(bytes=msg_id)
 
 
 @pytest.mark.parametrize("payload", [b"this is the payload", b""])

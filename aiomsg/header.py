@@ -26,9 +26,11 @@ def parse_header(message: bytes) -> MessageParts:
     d = m.groupdict()
 
     if d["msg_id"]:
+        # noinspection PyTypeChecker
         d["msg_id"] = UUID(bytes=d["msg_id"])
 
     if d["msg_type"]:
+        # noinspection PyTypeChecker
         d["msg_type"] = d["msg_type"].decode()
 
     # TODO: we have to be aware of copies here. The payload could be

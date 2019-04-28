@@ -2,7 +2,6 @@ import os
 import asyncio
 import pathlib
 import sys
-import time
 import uuid
 from collections import defaultdict
 from contextlib import suppress
@@ -33,7 +32,14 @@ def ssl_contexts():
     cert_filename = f"{name}.crt"
     key_filename = f"{name}.key"
     # https://stackoverflow.com/a/43860138
-    # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes -keyout example.key -out example.crt -extensions san -config <(echo "[req]"; echo distinguished_name=req; echo "[san]"; echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) -subj /CN=example.com
+    # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+    #   -keyout example.key -out example.crt \
+    #   -extensions san \
+    #   -config <(echo "[req]"; \
+    #             echo distinguished_name=req; \
+    #             echo "[san]"; \
+    #             echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) \
+    #   -subj /CN=example.com
     cmd = (
         f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename} "
         f"-x509 -days 365 -out {cert_filename} "
@@ -75,9 +81,9 @@ def test_hello(
 
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind) as server:
+    with bind_sock(send_mode=bind_send_mode, port=port, ssl_context=ctx_bind) as server:
 
         async def server_recv():
             message = await sock_receiver(message_type, server)
@@ -87,7 +93,7 @@ def test_hello(
         loop.create_task(server_recv())
 
         with conn_sock(
-            send_mode=conn_send_mode, port=PORT, ssl_context=ctx_connect
+            send_mode=conn_send_mode, port=port, ssl_context=ctx_connect
         ) as client:
 
             async def client_recv():
@@ -123,9 +129,9 @@ def test_hello_before(
 
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
     with conn_sock(
-        send_mode=conn_send_mode, port=PORT, ssl_context=ctx_connect
+        send_mode=conn_send_mode, port=port, ssl_context=ctx_connect
     ) as client:
 
         async def client_recv():
@@ -137,7 +143,7 @@ def test_hello_before(
         loop.create_task(client_recv())
 
         with bind_sock(
-            send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind
+            send_mode=bind_send_mode, port=port, ssl_context=ctx_bind
         ) as server:
 
             async def server_recv():
@@ -156,9 +162,9 @@ def test_hello_before(
 
 def test_context_managers(loop):
     value = b"hello"
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(port=PORT) as bsock, conn_sock(port=PORT) as csock:
+    with bind_sock(port=port) as bsock, conn_sock(port=port) as csock:
 
         async def test():
             await bsock.send(value)
@@ -245,11 +251,11 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
     size = 100
     sends = defaultdict(list)
     receipts = defaultdict(list)
-    PORT = portpicker.pick_unused_port()
-    with bind_sock(identity="server", port=PORT, ssl_context=ctx_bind) as server:
+    port = portpicker.pick_unused_port()
+    with bind_sock(identity="server", port=port, ssl_context=ctx_bind) as server:
         with conn_sock(
-            identity="c1", port=PORT, ssl_context=ctx_connect
-        ) as c1, conn_sock(identity="c2", port=PORT, ssl_context=ctx_connect) as c2:
+            identity="c1", port=port, ssl_context=ctx_connect
+        ) as c1, conn_sock(identity="c2", port=port, ssl_context=ctx_connect) as c2:
 
             async def c1listen():
                 with suppress(asyncio.CancelledError):
@@ -341,9 +347,9 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     TODO: Include SSL
     """
     ctx_args = []
-    ctx_bind = ctx_connect = None
+    ctx_connect = None
     if ssl_enabled:
-        ctx_bind, ctx_connect, cert_filename, key_filename = ssl_contexts
+        _, ctx_connect, cert_filename, key_filename = ssl_contexts
         ctx_args = ["--certfile", cert_filename, "--keyfile", key_filename]
         logger.debug(ctx_args)
 
@@ -379,7 +385,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                             "--port",
                             f"{port}",
                             "--sendmode",
-                            "ROUNDROBIN",
+                            bind_send_mode.name,
                             "--identity",
                             str(uuid4()),
                             *ctx_args,
@@ -446,7 +452,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
 
 
 def test_connection(loop):
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
     async def srv():
         """Echo server"""
@@ -472,7 +478,7 @@ def test_connection(loop):
         s = None
         try:
             s = await asyncio.start_server(
-                client_connected_cb=cb, host="127.0.0.1", port=PORT
+                client_connected_cb=cb, host="127.0.0.1", port=port
             )
             # await s.wait_closed()
             await asyncio.sleep(1000)
@@ -494,7 +500,7 @@ def test_connection(loop):
         received.append((identity, data))
 
     async def client():
-        reader, writer = await asyncio.open_connection(host="127.0.0.1", port=PORT)
+        reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
 
         c = aiomsg.Connection(
             identity=str(uuid4()), reader=reader, writer=writer, recv_event=recv_event
@@ -531,9 +537,9 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
     sent = []
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind) as server:
+    with bind_sock(send_mode=bind_send_mode, port=port, ssl_context=ctx_bind) as server:
 
         async def server_recv():
             for i in range(10):
@@ -549,7 +555,7 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
             # 1. Context manager for the socket
             async with aiomsg.Søcket(send_mode=conn_send_mode) as s:
                 # 2. Gotta do the connect call
-                await s.connect(port=PORT, ssl_context=ctx_connect)
+                await s.connect(port=port, ssl_context=ctx_connect)
                 # 3. async for to get the received messages one by one.
                 async for msg in s.messages():
                     received.append(msg)

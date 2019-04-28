@@ -8,12 +8,13 @@ from aiomsg import Søcket, SendMode, DeliveryGuarantee
 logger = logging.getLogger("echo_server")
 
 
+# noinspection PyShadowingNames
 async def main(args):
+    logger.info(f"args: {args}")
+    loop = asyncio.get_event_loop()
     if args.debug:
         logging.getLogger("asyncio").setLevel("DEBUG")
-        asyncio.get_running_loop().set_debug(True)
-    logger.info(f"args: {args}")
-    loop = asyncio.get_running_loop()
+        loop.set_debug(True)
     ctx = None
     if args.certfile:
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

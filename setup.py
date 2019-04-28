@@ -12,7 +12,7 @@ with open(path.join(here, "README.rst"), encoding="utf-8") as f:
     long_description = f.read()
 
 extras_require = {
-    "dev": ["check-manifest", "colorama", "pygments", "twine", "wheel"],
+    "dev": ["check-manifest", "colorama", "pygments", "twine", "wheel", "aiorun"],
     "test": ["pytest", "pytest-cov", "portpicker", "pytest-benchmark"],
     "doc": ["sphinx"],
 }

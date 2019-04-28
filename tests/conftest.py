@@ -1,4 +1,3 @@
-import os, pathlib
 import sys
 import asyncio
 import logging
@@ -15,11 +14,10 @@ logging.getLogger("asyncio").setLevel("DEBUG")
 @pytest.fixture
 def loop():
     if sys.platform == "win32":
-        ev = asyncio.ProactorEventLoop()
+        ev: asyncio.AbstractEventLoop = asyncio.ProactorEventLoop()
     else:
-        ev = asyncio.new_event_loop()
+        ev: asyncio.AbstractEventLoop = asyncio.new_event_loop()
 
-    ev: asyncio.AbstractEventLoop
     ev.set_debug(True)
     asyncio.set_event_loop(ev)
     try:
