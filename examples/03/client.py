@@ -1,4 +1,5 @@
-import logging, itertools
+import logging
+import itertools
 import asyncio
 import random
 

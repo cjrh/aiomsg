@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from contextlib import contextmanager
 
 from aiomsg import Søcket
+
+logger = logging.getLogger(__name__)
 
 
 def run(coro, timeout=1000):

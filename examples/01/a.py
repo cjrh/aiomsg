@@ -1,11 +1,9 @@
 import logging
 import asyncio
 import aiomsg
-from colorama import init
+from colorama import init, Fore, Style
 
 init()
-from colorama import Fore, Back, Style
-
 logging.basicConfig(level="DEBUG")
 
 

@@ -1,6 +1,7 @@
 import os
 import asyncio
-import time
+import pathlib
+import sys
 import uuid
 from collections import defaultdict
 from contextlib import suppress
@@ -9,6 +10,7 @@ from uuid import uuid4
 import subprocess as sp
 import shlex
 import ssl
+import logging
 
 import aiomsg
 from aiomsg import Søcket, SendMode
@@ -18,13 +20,26 @@ import pytest
 from tests.utils import run, bind_sock, conn_sock, sock_receiver, sock_sender
 
 
+logger = logging.getLogger(__name__)
+
+
 @pytest.fixture(scope="module")
 def ssl_contexts():
     name = str(uuid.uuid4().hex)
+    import pathlib
+
+    pwd = pathlib.Path().absolute()
     cert_filename = f"{name}.crt"
     key_filename = f"{name}.key"
     # https://stackoverflow.com/a/43860138
-    # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes -keyout example.key -out example.crt -extensions san -config <(echo "[req]"; echo distinguished_name=req; echo "[san]"; echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) -subj /CN=example.com
+    # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+    #   -keyout example.key -out example.crt \
+    #   -extensions san \
+    #   -config <(echo "[req]"; \
+    #             echo distinguished_name=req; \
+    #             echo "[san]"; \
+    #             echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) \
+    #   -subj /CN=example.com
     cmd = (
         f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename} "
         f"-x509 -days 365 -out {cert_filename} "
@@ -42,7 +57,7 @@ def ssl_contexts():
         ctx_connect.load_verify_locations(cert_filename)
         ctx_connect.load_cert_chain(certfile=cert_filename, keyfile=key_filename)
 
-        yield ctx_bind, ctx_connect
+        yield ctx_bind, ctx_connect, str(pwd / cert_filename), str(pwd / key_filename)
     finally:
         os.unlink(cert_filename)
         os.unlink(key_filename)
@@ -62,13 +77,13 @@ def test_hello(
 
     ctx_bind, ctx_connect = None, None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        ctx_bind, ctx_connect, *_ = ssl_contexts
 
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind) as server:
+    with bind_sock(send_mode=bind_send_mode, port=port, ssl_context=ctx_bind) as server:
 
         async def server_recv():
             message = await sock_receiver(message_type, server)
@@ -78,7 +93,7 @@ def test_hello(
         loop.create_task(server_recv())
 
         with conn_sock(
-            send_mode=conn_send_mode, port=PORT, ssl_context=ctx_connect
+            send_mode=conn_send_mode, port=port, ssl_context=ctx_connect
         ) as client:
 
             async def client_recv():
@@ -110,13 +125,13 @@ def test_hello_before(
     """One server, one client, echo server"""
     ctx_bind, ctx_connect = None, None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        ctx_bind, ctx_connect, *_ = ssl_contexts
 
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
     with conn_sock(
-        send_mode=conn_send_mode, port=PORT, ssl_context=ctx_connect
+        send_mode=conn_send_mode, port=port, ssl_context=ctx_connect
     ) as client:
 
         async def client_recv():
@@ -128,7 +143,7 @@ def test_hello_before(
         loop.create_task(client_recv())
 
         with bind_sock(
-            send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind
+            send_mode=bind_send_mode, port=port, ssl_context=ctx_bind
         ) as server:
 
             async def server_recv():
@@ -147,9 +162,9 @@ def test_hello_before(
 
 def test_context_managers(loop):
     value = b"hello"
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(port=PORT) as bsock, conn_sock(port=PORT) as csock:
+    with bind_sock(port=port) as bsock, conn_sock(port=port) as csock:
 
         async def test():
             await bsock.send(value)
@@ -164,7 +179,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     """One server, one client, echo server"""
     ctx_bind = ctx_connect = None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        ctx_bind, ctx_connect, *_ = ssl_contexts
 
     received = []
     port = portpicker.pick_unused_port()
@@ -231,16 +246,16 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
 def test_identity(loop, ssl_enabled, ssl_contexts):
     ctx_bind = ctx_connect = None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        ctx_bind, ctx_connect, *_ = ssl_contexts
 
     size = 100
     sends = defaultdict(list)
     receipts = defaultdict(list)
-    PORT = portpicker.pick_unused_port()
-    with bind_sock(identity="server", port=PORT, ssl_context=ctx_bind) as server:
+    port = portpicker.pick_unused_port()
+    with bind_sock(identity="server", port=port, ssl_context=ctx_bind) as server:
         with conn_sock(
-            identity="c1", port=PORT, ssl_context=ctx_connect
-        ) as c1, conn_sock(identity="c2", port=PORT, ssl_context=ctx_connect) as c2:
+            identity="c1", port=port, ssl_context=ctx_connect
+        ) as c1, conn_sock(identity="c2", port=port, ssl_context=ctx_connect) as c2:
 
             async def c1listen():
                 with suppress(asyncio.CancelledError):
@@ -324,10 +339,6 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     state back from the persistent storage. But we don't have anything
     like that in aiomsg yet.
 
-    TODO: This is a not a good way to test this. server and client should
-     be running a separate processes.  Weird things happen because the
-     event loop is persistent, while the server comes and goes.
-
     TODO: Another version of this test with multiple clients.
 
     TODO: Do we want this delivery guarantee thing to also apply to
@@ -335,40 +346,77 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
 
     TODO: Include SSL
     """
-    ctx_bind = ctx_connect = None
+    ctx_args = []
+    ctx_connect = None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        _, ctx_connect, cert_filename, key_filename = ssl_contexts
+        ctx_args = ["--certfile", cert_filename, "--keyfile", key_filename]
+        logger.debug(ctx_args)
 
     bind_send_mode = SendMode.ROUNDROBIN
     conn_send_mode = SendMode.ROUNDROBIN
     message_type = "bytes"
 
     received = []
-    received_by_server = []
     sent = []
-    fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
-    t0 = time.time()
+    port = portpicker.pick_unused_port()
 
     with conn_sock(
         send_mode=conn_send_mode,
-        port=PORT,
+        port=port,
         ssl_context=ctx_connect,
         delivery_guarantee=aiomsg.DeliveryGuarantee.AT_LEAST_ONCE,
     ) as client:
 
-        async def client_recv():
-            while True:
-                t = loop.create_task(sock_receiver(message_type, client))
-                done, pending = await asyncio.wait(
-                    [t, fut], return_when=asyncio.FIRST_COMPLETED
-                )
-                if fut in done:
-                    return
+        echo_server_path = pathlib.Path(__file__).parent / "echo_server.py"
 
-                message = t.result()
-                print(f"CLIENT GOT: {message}")
-                received.append(message)
+        async def intermittent_server():
+            logger.info("Starting intermittent server")
+            while True:
+                logger.info("Creating new subprocess")
+                p = None
+                try:
+                    p = await asyncio.create_subprocess_exec(
+                        sys.executable,
+                        *[
+                            str(echo_server_path),
+                            "--hostname",
+                            "127.0.0.1",
+                            "--port",
+                            f"{port}",
+                            "--sendmode",
+                            bind_send_mode.name,
+                            "--identity",
+                            str(uuid4()),
+                            *ctx_args,
+                        ],
+                        stderr=sp.STDOUT,
+                    )
+                    logger.info("SERVER IS UP")
+                    await asyncio.sleep(uniform(1, 5))
+                finally:
+                    # try-finally is needed because a cancellation above in
+                    # `await asyncio.create_subprocess_exec()` would exit
+                    # this entire coroutine, leaving no way to kill the
+                    # process
+                    if p:
+                        p.kill()
+                    logger.info("SERVER IS DOWN")
+
+                await asyncio.sleep(uniform(0, 1))
+
+        server_task = loop.create_task(intermittent_server())
+
+        async def client_recv():
+            try:
+                while True:
+                    message = await sock_receiver(message_type, client)
+                    logger.info(f"CLIENT GOT: {message}")
+                    received.append(message)
+            except asyncio.CancelledError:
+                pass
+
+        trecv = loop.create_task(client_recv())
 
         async def client_send():
             """This function drives everything, and sets the termination
@@ -376,80 +424,35 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
             await asyncio.sleep(2.0)
             for i in range(100):
                 value = f"{i}".encode()
-                print(f"CLIENT SENT: {value}")
+                logger.info(f"CLIENT SENT: {value}")
                 await sock_sender(message_type, client, value)
                 sent.append(value)
-                await asyncio.sleep(uniform(0, 1))
+                await asyncio.sleep(uniform(0, 0.1))
 
-            # Shut it all down given enough time for the server to come
-            # back online and process our message.
-            loop.call_later(5.0, fut.set_result, 1)
+            # Should be long enough to let the server volley all outstanding
+            # messages back to us.
+            await asyncio.sleep(10.0)
+            trecv.cancel()
+            server_task.cancel()
 
-        loop.create_task(client_recv())
-        loop.create_task(client_send())
-        count = [0]
+        tsend = loop.create_task(client_send())
+        loop.run_until_complete(tsend)
 
-        while not fut.done() and time.time() - t0 < 180:
-            with bind_sock(
-                send_mode=bind_send_mode,
-                port=PORT,
-                ssl_context=ctx_bind,
-                delivery_guarantee=aiomsg.DeliveryGuarantee.AT_LEAST_ONCE,
-            ) as server:
-
-                async def server_recv():
-                    while not fut.done():
-                        t = loop.create_task(sock_receiver(message_type, server))
-                        try:
-                            done, pending = await asyncio.wait(
-                                [t, fut], return_when=asyncio.FIRST_COMPLETED
-                            )
-                        except asyncio.CancelledError:
-                            print("Server shutting down")
-                            return
-                        else:
-                            if fut in done:
-                                return
-
-                        message = t.result()
-                        print(f"SERVER GOT {message}")
-                        received_by_server.append(message)
-                        message = message.decode().upper().encode()
-                        count[0] += 1
-                        try:
-                            await sock_sender(message_type, server, message)
-                            print(f"SERVER SENT {message}")
-                        except asyncio.CancelledError:
-                            print("server cancelled")
-                            await sock_sender(message_type, server, message)
-                            print(f"SERVER SENT {message}")
-                            print("server leaving")
-                            return
-
-                t = loop.create_task(server_recv())
-                loop.call_later(uniform(1, 3), t.cancel)
-                loop.run_until_complete(t)
-
-            # Server is gone, so client is running here without server
-            loop.run_until_complete(asyncio.sleep(uniform(0.5, 3.0)))
-
-    print("GIVE A CHANCE TO FINISH")
-    loop.run_until_complete(asyncio.sleep(5.0))
     print(received)
     print(sent)
-    # This should never fail
-    assert set(received_by_server) == set(sent)
     # This could fail, e.g. if the server receives a message, but is
     # then hard cancelled before it has a chance to send that message
     # back to the client. It's a rare condition, and is a part of how
     # the test is set up (which really should be improved). For now
     # we'll just try to keep an eye on it to make sure this doesn't
     # suddenly get worse for whatever reason.
-    assert len(set(sent) - set(received)) < 3
+    didnt_make_it = set(sent) - set(received)
+    print(didnt_make_it)
+    assert len(didnt_make_it) < 3
 
 
 def test_connection(loop):
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
     async def srv():
         """Echo server"""
@@ -475,7 +478,7 @@ def test_connection(loop):
         s = None
         try:
             s = await asyncio.start_server(
-                client_connected_cb=cb, host="127.0.0.1", port=PORT
+                client_connected_cb=cb, host="127.0.0.1", port=port
             )
             # await s.wait_closed()
             await asyncio.sleep(1000)
@@ -497,7 +500,7 @@ def test_connection(loop):
         received.append((identity, data))
 
     async def client():
-        reader, writer = await asyncio.open_connection(host="127.0.0.1", port=PORT)
+        reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
 
         c = aiomsg.Connection(
             identity=str(uuid4()), reader=reader, writer=writer, recv_event=recv_event
@@ -529,14 +532,14 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
 
     ctx_bind, ctx_connect = None, None
     if ssl_enabled:
-        ctx_bind, ctx_connect = ssl_contexts
+        ctx_bind, ctx_connect, *_ = ssl_contexts
 
     sent = []
     received = []
     fut = asyncio.Future()
-    PORT = portpicker.pick_unused_port()
+    port = portpicker.pick_unused_port()
 
-    with bind_sock(send_mode=bind_send_mode, port=PORT, ssl_context=ctx_bind) as server:
+    with bind_sock(send_mode=bind_send_mode, port=port, ssl_context=ctx_bind) as server:
 
         async def server_recv():
             for i in range(10):
@@ -552,7 +555,7 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
             # 1. Context manager for the socket
             async with aiomsg.Søcket(send_mode=conn_send_mode) as s:
                 # 2. Gotta do the connect call
-                await s.connect(port=PORT, ssl_context=ctx_connect)
+                await s.connect(port=port, ssl_context=ctx_connect)
                 # 3. async for to get the received messages one by one.
                 async for msg in s.messages():
                     received.append(msg)

@@ -45,10 +45,22 @@ from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import UserDict
 from itertools import cycle
-from typing import Dict, Optional, Tuple, Union, List, AsyncGenerator, Callable
+from weakref import WeakSet
+from typing import (
+    Dict,
+    Optional,
+    Tuple,
+    Union,
+    List,
+    AsyncGenerator,
+    Callable,
+    MutableMapping,
+)
 
 from aiomsg import header
 from . import msgproto
+
+__all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
 
 logger = logging.getLogger(__name__)
 slogger = logging.getLogger(__name__ + ".server")
@@ -100,6 +112,7 @@ class ConnectionsDict(UserDict):
             raise NoConnectionsAvailableError
 
 
+# noinspection NonAsciiCharacters
 class Søcket:
     def __init__(
         self,
@@ -109,6 +122,7 @@ class Søcket:
         identity: Optional[str] = None,
         loop=None,
     ):
+        self._tasks = WeakSet()
         self.send_mode = send_mode
         self.delivery_guarantee = delivery_guarantee
         self.receiver_channel = receiver_channel
@@ -116,7 +130,7 @@ class Søcket:
         self.loop = loop or asyncio.get_event_loop()
 
         self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
-        self._connections: Dict[str, Connection] = ConnectionsDict()
+        self._connections: MutableMapping[str, Connection] = ConnectionsDict()
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
@@ -145,7 +159,12 @@ class Søcket:
         self.check_socket_type()
         logger.info(f"Binding socket {self.identity} to {hostname}:{port}")
         coro = asyncio.start_server(
-            self._connection, hostname, port, loop=self.loop, ssl=ssl_context
+            self._connection,
+            hostname,
+            port,
+            loop=self.loop,
+            ssl=ssl_context,
+            reuse_address=True,
         )
         self.server = await coro
         logger.info("Server started.")
@@ -177,7 +196,7 @@ class Søcket:
                 await self._connection(reader, writer)
                 logger.info("Connection dropped, reconnecting.")
 
-        self.loop.create_task(connect_with_retry())
+        self._tasks.add(self.loop.create_task(connect_with_retry()))
         return self
 
     async def messages(self) -> AsyncGenerator[bytes, None]:
@@ -228,10 +247,10 @@ class Søcket:
             writer=writer,
             recv_event=self.raw_recv,
         )
-        self._connections[connection.identity] = connection
-        if len(self._connections) == 1:
+        if len(self._connections) == 0:
             logger.warning("First connection made")
             self.at_least_one_connection.set()
+        self._connections[connection.identity] = connection
 
         try:
             await connection.run()
@@ -263,9 +282,14 @@ class Søcket:
         self.sender_task.cancel()
         await self.sender_task
 
-        results = await asyncio.gather(
+        await asyncio.gather(
             *(c.close() for c in self._connections.values()), return_exceptions=True
         )
+
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+
         logger.info(f"Closed {self.identity}")
 
     async def close(self, timeout=10):
@@ -310,7 +334,7 @@ class Søcket:
 
             # Send acknowledgement of receipt back to the sender
 
-            def notify_REP():
+            def notify_rep():
                 logger.debug(f"Got an REQ, sending back an REP msg_id: {parts.msg_id}")
                 self._user_send_queue.put_nowait(
                     # BECAUSE the identity is specified here, we are sure to
@@ -325,7 +349,7 @@ class Søcket:
             # REP *before* parts.payload has been given to the app, and the
             # app shuts down before being able to do anything with
             # parts.payload
-            self.loop.call_later(0.02, notify_REP)  # 20 ms
+            self.loop.call_later(0.02, notify_rep)  # 20 ms
             return
 
         # Now we get to the second case. the message we're received here is
@@ -361,11 +385,11 @@ class Søcket:
         data = await self.recv_string()
         return json.loads(data)
 
-    async def send(self, data: bytes, identity: Optional[str] = None):
+    async def send(self, data: bytes, identity: Optional[str] = None, retries=None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
         original_data = data
         if self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
-            # Enable receipt acknowldement
+            # Enable receipt acknowledgement
             #####################################################################
             parts = header.MessageParts(
                 msg_id=uuid.uuid4(), msg_type="REQ", payload=data
@@ -374,19 +398,27 @@ class Søcket:
             # TODO: Might want to add a retry counter here somewhere, to keep
             #  track of repeated failures to send a specific message.
 
-            loop = asyncio.get_running_loop()
+            def resend(retries):
+                if retries == 0:
+                    logger.info(
+                        f"No more retries to send. Dropping [{original_data[:20]}...]"
+                    )
+                    return
 
-            def resend():
                 logger.debug(
                     f"Scheduling the resend to identity:{identity} for data {original_data}"
                 )
-                loop.create_task(self.send(original_data, identity))
+                self._tasks.add(
+                    self.loop.create_task(self.send(original_data, identity))
+                )
                 # After deleting this here, a new one will be created when
                 # we re-enter ``async def send()``
                 logger.debug(f"Removing the acks entry")
                 del self.waiting_for_acks[parts.msg_id]
 
-            handle: asyncio.Handle = loop.call_later(5.0, resend)
+            handle: asyncio.Handle = self.loop.call_later(
+                5.0, resend, 5 if retries is None else retries - 1
+            )
             # In self.raw_recv(), this handle will be cancelled if the other
             # side sends back an acknowledgement of receipt (REP)
             logger.debug("Creating future resend acks entry")
@@ -404,7 +436,7 @@ class Søcket:
     async def send_json(self, obj: JSONCompatible, identity: Optional[str] = None):
         await self.send_string(json.dumps(obj), identity)
 
-    async def _sender_publish(self, message: bytes):
+    def _sender_publish(self, message: bytes):
         logger.debug(f"Sending message via publish")
         # TODO: implement grouping by named channels
         for identity, c in self._connections.items():
@@ -417,41 +449,34 @@ class Søcket:
                     f"Dropped msg to Connection {identity}, its write queue is full."
                 )
 
-    async def _sender_robin(self, message: bytes):
+    def _sender_robin(self, message: bytes):
+        """
+        Raises:
+
+        - NoConnectionsAvailableError
+
+        """
         logger.debug(f"Sending message via round_robin")
-        sent = False
-        while not sent:
-            # TODO: this can raise StopIteration if the iterator is empty
-            # TODO: in that case we should add data to the backlog
+        while True:
             identity = next(self._connections)
             logger.debug(f"Got connection: {identity}")
             try:
                 connection = self._connections[identity]
-                # It's hard to guarantee sending if we place messages
-                # on a queue here, because the cycle of peers is
-                # performed here. Therefore, instead we wait for
-                # successful sending using the send_wait method,
-                # and if that doesn't happen we try a different
-                # peer.
-                # connection.writer_queue.put_nowait(message)
-                await asyncio.wait_for(connection.send_wait(message), timeout=60)
+                connection.writer_queue.put_nowait(message)
                 logger.debug(f"Added message to connection send queue.")
-                sent = True
+                return
             except asyncio.QueueFull:
                 logger.warning(
-                    "Cannot send to Connection blah, its write " "queue is full!"
+                    "Cannot send to Connection blah, its write queue is full! "
+                    "Trying a different peer..."
                 )
-            except asyncio.TimeoutError:
-                logger.warning(f"Timed out sending to {identity}")
 
-    async def _sender_identity(self, message: bytes, identity: str):
+    def _sender_identity(self, message: bytes, identity: str):
         """Send directly to a peer with a distinct identity"""
-        logger.debug(f"Sending message via identity")
+        logger.debug(f"Sending message via identity {identity}: {message[:20]}...")
         c = self._connections.get(identity)
         if not c:
-            logger.error(
-                f"Peer {identity} is not connected. Message " f"will be dropped."
-            )
+            logger.error(f"Peer {identity} is not connected. Message will be dropped.")
             return
 
         try:
@@ -463,27 +488,28 @@ class Søcket:
     async def _sender_main(self):
         while True:
             q_task: asyncio.Task = self.loop.create_task(self._user_send_queue.get())
+            w_task: asyncio.Task = self.loop.create_task(
+                self.at_least_one_connection.wait()
+            )
             try:
-                done, pending = await asyncio.wait(
-                    [self.at_least_one_connection.wait(), q_task],
-                    return_when=asyncio.ALL_COMPLETED,
-                )
+                await asyncio.wait([w_task, q_task], return_when=asyncio.ALL_COMPLETED)
             except asyncio.CancelledError:
                 q_task.cancel()
+                w_task.cancel()
                 return
 
             identity, data = q_task.result()
             logger.debug(f"Got data to send: {data[:64]}")
             try:
                 if identity is not None:
-                    logger.debug(f"Sending msg via identity {identity}: {data[:64]}")
-                    await self._sender_identity(data, identity)
+                    self._sender_identity(data, identity)
                 else:
                     try:
                         logger.debug(f"Sending msg via handler: {data[:64]}")
-                        await self.sender_handler(message=data)
+                        self.sender_handler(message=data)
                     except NoConnectionsAvailableError:
                         logger.error("No connections available")
+                        self.at_least_one_connection.clear()
                         try:
                             # Put it back onto the queue
                             self._user_send_queue.put_nowait((identity, data))
@@ -528,8 +554,8 @@ class Connection:
         self.writer_queue = asyncio.Queue()
         self.reader_event = recv_event
 
-        self.reader_task: asyncio.Task = None
-        self.writer_task: asyncio.Task = None
+        self.reader_task: Optional[asyncio.Task] = None
+        self.writer_task: Optional[asyncio.Task] = None
 
         self.heartbeat_interval = 5
         self.heartbeat_timeout = 15
@@ -561,7 +587,7 @@ class Connection:
                 )
                 logger.debug(f"Got message in connection: {message}")
             except asyncio.TimeoutError:
-                logger.warning("Heartbeat failed")
+                logger.warning("Heartbeat failed. Closing connection.")
                 self.writer_queue.put_nowait(None)
                 return
                 # raise HeartBeatFailed
@@ -620,8 +646,8 @@ class Connection:
                 try:
                     await self.send_wait(message)
                     logger.debug("Sent message")
-                except (ConnectionAbortedError, ConnectionResetError) as e:
-                    logger.exception(
+                except ConnectionError as e:
+                    logger.error(
                         f"Connection {self.identity} aborted, dropping "
                         f"message: {message[:50]}...{message[-50:]}\n"
                         f"error: {e}"
@@ -637,6 +663,7 @@ class Connection:
         try:
             self.writer.close()
             if sys.version_info >= (3, 7):
+                # noinspection PyUnresolvedReferences
                 await self.writer.wait_closed()
         except Exception as e:
             logger.error(f"Unhandled error: {e}")
@@ -647,7 +674,7 @@ class Connection:
         self.writer_task = self.loop.create_task(self._send())
 
         try:
-            done, pending = await asyncio.wait(
+            await asyncio.wait(
                 [self.reader_task, self.writer_task],
                 loop=self.loop,
                 return_when=asyncio.ALL_COMPLETED,
@@ -659,3 +686,13 @@ class Connection:
             await group
             self.warn_dropping_data()
         logger.info(f"Connection {self.identity} no longer active.")
+
+
+def swallow_cancellation(f):
+    async def inner(*args, **kwargs):
+        try:
+            return await f(*args, **kwargs)
+        except asyncio.CancelledError:
+            pass
+
+    return inner

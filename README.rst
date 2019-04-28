@@ -45,7 +45,7 @@ Pure-Python smart sockets (like ZMQ) for simple microservices architecture
     ⚠️ Right now this is in ALPHA. I'm changing stuff all the time. Don't
     depend on this library unless you can handle API breakage between
     releases. Your semver has no power here, this is calver country.
-    When I'm happy with the API I'll remove this wraning.
+    When I'm happy with the API I'll remove this warning.
 
 Table of Contents
 -----------------
@@ -189,8 +189,8 @@ let everyone know you want the connection to stay up, and if the connection
 goes down, you will know much sooner than the standard TCP keepalive
 timeout duration (which can be very long!).
 
-Scenarios
----------
+Cookbook
+--------
 
 The message distribution patterns are what make ``aiomsg`` powerful. It
 is the way you connect up a whole bunch of microservices that brings the
