@@ -20,7 +20,7 @@ extras_require["all"] = list({pkg for k, v in extras_require.items() for pkg in 
 
 setup(
     name="aiomsg",
-    version="2019.4.3",
+    version="2019.4.4",
     description="Socket-based abstraction for messaging patterns",
     long_description=long_description,
     long_description_content_type="text/x-rst",
