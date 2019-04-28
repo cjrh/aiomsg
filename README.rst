@@ -658,68 +658,7 @@ port is being used, 25002):
 Three proxies, each running in a different availability zone, should
 be adequate for most common scenarios.
 
-Point-to-point (identity-based message distribution)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The two scenarios described above don't provide a way for you to
-send a message to a *specific* peer, if there are many concurrent
-connections. This is often necessary to make "request-reply" patterns
-work--you need to reply to the same peer that made the request.
-
-This is pretty straightforward to do, and it doesn't need a specific
-send-mode either:
-
-.. code-block:: python3
-
-    import asyncio
-    from aiomsg import Søcket, SendMode
-
-    async def main():
-        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
-        await sock.bind('127.0.0.1', 25000)
-        counter = 0
-        while True:
-            # The `recv_identity()` method is always available
-            identity, message = await sock.recv_identity()
-            if message == b'Ready for work':
-                # Send back to the same peer that gave
-                loop.create_task(
-                    sock.send(
-                        f'job #{counter}'.encode(),
-                        # Identity can always be provided to the
-                        # `send()` method. In this case, send-mode
-                        # is ignored.
-                        identity=identity
-                )
-            counter += 1
-
-    asyncio.run(main())
-
-The snipped above is an example where a peer tells you when they are
-ready for more work. This is a pretty useful pattern.
-
-The corresponding peer code is straightforward:
-
-.. code-block:: python3
-
-    import asyncio
-    from aiomsg import Søcket
-
-    async def sub():
-        sock = Søcket()
-        await sock.connect('127.0.0.1', 25000)
-        # You need to ask for work to kick things off!
-        await sock.send(b'Ready for work')
-        while True:
-            # Get work
-            message = await sock.recv()
-            print(f'sock received {message}')
-            <do the work>
-            await sock.send(b'Ready for work')
-
-    loop = asyncio.get_event_loop()
-    listeners = [loop.create_task(sub()) for _ in range(10)
-    loop.run_until_complete(asyncio.gather(*listeners))
+TODO: more scenarios involving identity (like ROUTER-DEALER)
 
 FAQ
 ---
