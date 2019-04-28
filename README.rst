@@ -127,67 +127,209 @@ What you see above in the demo is pretty much a typical usage of
 network sockets. So what's special about ``aiomsg``? These are
 the high-level features:
 
-Messages, not streams
-^^^^^^^^^^^^^^^^^^^^^
+#.  Messages, not streams:
 
-Send and receive are *message-based*, not stream based. Much easier! This
-does mean that if you want to transmit large amounts of data, you're going
-to have have to break them up yourself, send the pieces, and put them
-back together on the other side.
+    Send and receive are *message-based*, not stream based. Much easier! This
+    does mean that if you want to transmit large amounts of data, you're going
+    to have have to break them up yourself, send the pieces, and put them
+    back together on the other side.
 
-Automatic reconnection
-^^^^^^^^^^^^^^^^^^^^^^
+#.  Automatic reconnection
 
-These sockets automatically reconnect. You don't have to
-write special code for it. If the bind end (a.k.a "server") is restarted,
-the connecting end will automatically reconnect. This works in either
-direction.  Try it! run the demo code and kill one of the processes.
-And then start it up again. The connection will get re-established.
+    These sockets automatically reconnect. You don't have to
+    write special code for it. If the bind end (a.k.a "server") is restarted,
+    the connecting end will automatically reconnect. This works in either
+    direction.  Try it! run the demo code and kill one of the processes.
+    And then start it up again. The connection will get re-established.
 
-Many connections on a single socket
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#.  Many connections on a single socket
 
-The bind end can receive multiple connections, but you do all your
-``.send()`` and ``.recv()`` calls on a single object. (No
-callback handlers or protocol objects.)
+    The bind end can receive multiple connections, but you do all your
+    ``.send()`` and ``.recv()`` calls on a single object. (No
+    callback handlers or protocol objects.)
 
-More impressive is that the connecting end is exactly the same; it can make
-outgoing ``connect()`` calls to multiple peers (bind sockets),
-and you make all your ``send()`` and ``recv()`` calls on a single object.
+    More impressive is that the connecting end is exactly the same; it can make
+    outgoing ``connect()`` calls to multiple peers (bind sockets),
+    and you make all your ``send()`` and ``recv()`` calls on a single object.
 
-This will be described in more detail further on in this document.
+    This will be described in more detail further on in this document.
 
-Message distribution patterns
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#.  Message distribution patterns
 
-For ``send()``, you can configure the socket to distribute messages
-to all the connections in various ways. The three standard options
-are:
+    Receiving messages is pretty simple: new messages just show up (remember
+    that messages from all connected peers come through the same call):
 
-- **Pub-sub**: each connected peer gets a copy
-- **Round-robin**: each connected peer gets a *unique* message; the messages
-  are distributed to each connection in a circular pattern.
-- **By peer identity**: you can also send to a specific peer by using
-  its identity.
+    .. code-block:: python3
 
-This will be described in more detail further on in this document.
+        async with Søcket().bind() as sock:
+            async for msg in sock.messages():
+                print(f"Received: {msg}")
 
-Built-in heartbeating
-^^^^^^^^^^^^^^^^^^^^^
+    However, when sending messages you have choices. The choices affect
+    **which peers** get the message. The options are:
 
-Because ain't nobody got time to mess around with TCP keepalive
-settings. The heartbeating is internal and opaque to your application
-code. You won't even know it's happening, unless you enable debug
-logs. Heartbeats are sent only during periods of inactivity, so
-they won't interfere with your application messages.
+    - **Publish**: every connected peer is sent a copy of the message
+    - **Round-robin**: each connected peer is sent a *unique* message; the messages
+      are distributed to each connection in a circular pattern.
+    - **By peer identity**: you can also send to a specific peer by using
+      its identity directly.
 
-You really shouldn't need heartbeating, since TCP is a very robust
-protocol; but in practice, various intermediate servers and routers
-sometimes do silly things to your connection if they think a connection
-has been idle for too long. So, automatic heartbeating is baked in to
-let everyone know you want the connection to stay up, and if the connection
-goes down, you will know much sooner than the standard TCP keepalive
-timeout duration (which can be very long!).
+    The choice between *pub-sub* and *round-robin* must be made when
+    creating the ``Søcket()``:
+
+    .. code-block:: python3
+
+        from aiomsg import Søcket, SendMode
+
+        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+            async for msg in sock.messages():
+                await sock.send(msg)
+
+    This example receives a message from any connected peer, and sends
+    that same message to *every* connected peer (including the original
+    sender). By changing ``PUBLISH`` to ``ROUNDROBIN``, the message
+    distribution pattern changes so that each "sent" message goes to
+    only one connected peer. The next "sent" message will go to a
+    different connected, and so on.
+
+    For *identity-based* message sending, that's available any time,
+    regardless of what you choose for the ``send_mode`` parameter; for
+    example:
+
+    .. code-block:: python3
+
+        import asyncio
+        from aiomsg import Søcket, SendMode
+
+        async def main():
+            async with Søcket().bind(port=25000) as sock1, \
+                       Søcket(send_mode=SendMode.PUBLISH).bind(port=25001) as sock2:
+                while True:
+                    peer_id, message = await sock1.recv_identity()
+                    msg_id, _, data = msg.partition(b"\x00")
+                    await sock2.send(data)
+                    await sock1.send(msg_id + b"\x00ok", identity=peer_id)
+
+        asyncio.run(main())
+
+    This example shows how you can receive messages on one socket (``sock1``,
+    which could have thousands of connected peers), and relay those messages to
+    thousands of other peers connected on a different socket (``sock2``).
+
+    For this example, the ``send_mode`` of ``sock1`` doesn't matter because
+    if ``identity`` is specified in the ``send()`` call, it'll ignore
+    ``send_mode`` completely.
+
+    Oh, and the example above is a complete, runnable program which is
+    pretty amazing!
+
+#.  Built-in heartbeating
+
+    Because ain't nobody got time to mess around with TCP keepalive
+    settings. The heartbeating is internal and opaque to your application
+    code. You won't even know it's happening, unless you enable debug
+    logs. Heartbeats are sent only during periods of inactivity, so
+    they won't interfere with your application messages.
+
+    In theory, you really shouldn't need heartbeating because TCP is a very robust
+    protocol; but in practice, various intermediate servers and routers
+    sometimes do silly things to your connection if they think a connection
+    has been idle for too long. So, automatic heartbeating is baked in to
+    let all intermediate hops know you want the connection to stay up, and
+    if the connection goes down, you will know much sooner than the
+    standard TCP keepalive timeout duration (which can be very long!).
+
+    If either a heartbeat or a message isn't received within a specific
+    timeframe, that connection is destroyed. Whichever peer is making the
+    ``connect()`` call will then automatically try to reconnect, as
+    discussed earlier.
+
+#.  Built-in reliability choices
+
+    Ah, so what do "reliability choices" mean exactly...?
+
+    It turns out that it's quite hard to send messages in a reliable way.
+    Or, stated another way, it's quite hard to avoid dropping messages:
+    one side sends and the other side never gets the message.
+
+    ``aiomsg`` already buffers messages when being sent. Consider the
+    following example:
+
+    .. code-block:: python3
+
+        from aiomsg import Søcket, SendMode
+
+        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+            while True:
+                await sock.send(b'123)
+                await asyncio.sleep(1.0)
+
+    This server above will send the bytes ``b"123"`` to all connected peers;
+    but what happens if there are *no* connected peers? In this case the
+    message will be buffered internally until there is at least one
+    connected peer, and when that happens, all buffered messages will
+    immediately be sent. To be clear, you don't have to do anything extra.
+    This is just the normal behaviour, and it works the same with the
+    ``ROUNDROBIN`` send mode.
+
+    Message buffering happens whenever there are no connected peers
+    available to receive a message.  Sounds great right?  Unfortunately,
+    this is not quite enough to prevent messages from getting lost. It is
+    still easy to have your process killed immediately after sending data into
+    a kernel socket buffer, but right before the bytes actually get
+    transmitted. In other words, your code thinks the message got sent, but
+    it didn't actually get sent.
+
+    The only real solution for adding robustness is to have peers *reply*
+    to you saying that they received the message. Then, if you never receive
+    this notification, you should assume that the message might not have
+    been received, and send it again. ``aiomsg`` will do this for you
+    (so again there is no work on your part), but you do have to turn it
+    on.
+
+    This option is called the ``DeliveryGuarantee``. The default option,
+    which is just basic message buffering in the absence of any connected
+    peers, is called ``DeliveryGuarantee.AT_MOST_ONCE``. It means, literally,
+    that any "sent" message will received by a connected peer no more than
+    once (of course, it may also be zero, as described above).
+
+    The alternative is to set ``DeliveryGuarantee.AT_LEAST_ONCE``, which
+    enables the internal "retry" feature. It will be possible, under
+    certain conditions, that any given message could be received *more than
+    once*, depending on timing and situation.  This is how the code looks
+    if you enable it:
+
+    .. code-block:: python3
+
+        from aiomsg import Søcket, SendMode, DeliveryGuarantee
+
+        async with Søcket(
+                send_mode=SendMode.ROUNDROBIN,
+                delivery_guarantee=DeliveryGuarantee.AT_LEAST_ONCE
+        ).bind() as sock:
+            while True:
+                await sock.send(b'123)
+                await asyncio.sleep(1.0)
+
+    It's pretty much exactly the same as before, but we added the
+    ``AT_LEAST_ONCE`` option. Note that ``AT_LEAST_ONCE`` does not work
+    for the ``PUBLISH`` sending mode. (Would it make sense to enable?)
+
+    As a minor point, you should note that when ``AT_LEAST_ONCE`` is
+    enabled, it does not mean that every send waits for acknowledgement
+    before the next send. That would incur too much latency. Instead,
+    there is a "reply checker" that runs on a timer, and if a reply
+    hasn't been received for a particular message in a certain timeframe
+    (5.0 seconds by default), that message will be sent again.
+
+    The connection may have gone down and back up within those 5 seconds,
+    and there may be new messages buffered for sending before the retry
+    send happens. In this case, the retry message will arrive **after**
+    those buffered messages. This is a long way of saying that the way
+    that message reliability has been implemented can result in messages
+    being received in a different **order** to what they were sent. In
+    exchange for this, you get a lower overall latency because sending
+    new messages is not waiting on previous messages getting acknowledged.
 
 Cookbook
 --------
@@ -197,8 +339,8 @@ is the way you connect up a whole bunch of microservices that brings the
 greatest leverage. We'll go through the different scenarios using a
 cookbook format.
 
-Publish-subscribe (PUBSUB)
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+Publish-subscribe (PUBLISH)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 PUB from the bind end. (``PUBLISH`` is the default sending mode, but we're
 adding it in below to be explicit. This send-mode will send the same
