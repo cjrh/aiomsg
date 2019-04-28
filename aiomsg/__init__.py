@@ -388,7 +388,9 @@ class Søcket:
     async def send(self, data: bytes, identity: Optional[str] = None, retries=None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
         original_data = data
-        if self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
+        if (
+            identity or self.send_mode is SendMode.ROUNDROBIN
+        ) and self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
             # Enable receipt acknowledgement
             #####################################################################
             parts = header.MessageParts(
