@@ -441,6 +441,9 @@ class Søcket:
     def _sender_publish(self, message: bytes):
         logger.debug(f"Sending message via publish")
         # TODO: implement grouping by named channels
+        if not self._connections:
+            raise NoConnectionsAvailableError
+
         for identity, c in self._connections.items():
             logger.debug(f"Sending to connection: {identity}")
             try:
