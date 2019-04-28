@@ -54,7 +54,7 @@ Table of Contents
 
 
 Demo
-----
+====
 
 Let's make two microservices; one will send the current time to the other.
 Here's the end that binds to a port (a.k.a, the "server"):
@@ -93,13 +93,13 @@ sockets have a few extra tricks. These are described in more detail
 further down in rest of this document.
 
 Inspiration
------------
+===========
 
-Looks a lot like ZeroMQ, yes? no? Well if you don't know anything about
+Looks a lot like `ZeroMQ <http://zeromq.org/>`_, yes? no? Well if you
+don't know anything about
 ZeroMQ, that's fine too. The rest of this document will assume that you
-don't know anything about ZeroMQ. ``aiomsg`` is **heavily**
-modelled after ZeroMQ, to the point of being an almost-clone in the
-general feature set.
+don't know anything about ZeroMQ. ``aiomsg`` is heavily influenced
+by ZeroMQ.
 
 There are some differences; hopefully they make things simpler than zmq.
 For one thing, *aiomsg* is pure-python so no compilation step is required,
@@ -121,7 +121,7 @@ have the *connect* sockets. This is because the *hostnames* to which they
 will connect (these will be the *bind* sockets) will be long-lived.
 
 Introduction
-------------
+============
 
 What you see above in the demo is pretty much a typical usage of
 network sockets. So what's special about ``aiomsg``? These are
@@ -142,7 +142,7 @@ the high-level features:
     direction.  Try it! run the demo code and kill one of the processes.
     And then start it up again. The connection will get re-established.
 
-#.  Many connections on a single socket
+#.  Many connections on a single "socket"
 
     The bind end can receive multiple connections, but you do all your
     ``.send()`` and ``.recv()`` calls on a single object. (No
@@ -331,197 +331,332 @@ the high-level features:
     exchange for this, you get a lower overall latency because sending
     new messages is not waiting on previous messages getting acknowledged.
 
+#.  Pure python, doesn't require a compiler
+
+#.  Depends only on the Python standard library
+
+
 Cookbook
---------
+========
 
 The message distribution patterns are what make ``aiomsg`` powerful. It
 is the way you connect up a whole bunch of microservices that brings the
 greatest leverage. We'll go through the different scenarios using a
 cookbook format.
 
-Publish-subscribe (PUBLISH)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-PUB from the bind end. (``PUBLISH`` is the default sending mode, but we're
-adding it in below to be explicit. This send-mode will send the same
-message to *all* connected peers):
+In the code snippets that follow, you should assumed that each snippet
+is a complete working program, except that some boilerplate is omitted.
+This is the basic template:
 
 .. code-block:: python3
 
     import asyncio
-    from aiomsg import Søcket, SendMode
+    from aiomsg import Søcket, SendMode, DeliveryGuarantee
 
-    async def main():
-        sock = Søcket(send_mode=SendMode.PUBLISH)
-        await sock.bind('127.0.0.1', 25000)
-        while True:
-            await sock.send(b'News!')
-            await asyncio.sleep(1)
+    <main() function>
 
     asyncio.run(main())
 
-10 subscribers:
+Just substitute in the ``main()`` function from the snippets below to
+make the complete programs.
+
+Publish from either the *bind* or *connect* end
+-----------------------------------------------
+
+The choice of "which peer should bind" is unaffected by the sending mode
+of the socket.
+
+Compare
 
 .. code-block:: python3
 
-    import asyncio
-    from aiomsg import Søcket
-
-    async def sub():
-        sock = Søcket()
-        await sock.connect('127.0.0.1', 25000)
-        while True:
-            message = await sock.recv()
-            print(f'sock received {message}')
-
-    loop = asyncio.get_event_loop()
-    listeners = [loop.create_task(sub() for _ in range(10)
-    loop.run_until_complete(asyncio.gather(*listeners))
-
-Remember: you don't have to do any reconnection logic; if the bind end
-is restarted, the connect ends will automatically reconnect.
-
-We can flip it around, with a *connect* socket as the PUB
-end, and 10 *bind* sockets as the SUB listeners:
-
-.. code-block:: python3
-
-    import asyncio
-    from aiomsg import Søcket
-
-    ports = range(25000, 25010)
-
+    # Publisher that binds
     async def main():
-        sock = Søcket(send_mode=SendMode.PUBLISH)
-        for port in ports:   # <---- Must connect to each bind address
-            await sock.connect('127.0.0.1', port)
-        while True:
-            await sock.send(b'News!')
-            await asyncio.sleep(1)
+        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+            while True:
+                await sock.send(b'News!')
+                await asyncio.sleep(1)
 
-    asyncio.run(main())
-
-10 subscribers:
+versus
 
 .. code-block:: python3
 
-    import asyncio
-    from aiomsg import Søcket
-
-    ports = range(25000, 25010)
-
-    async def sub(port):
-        sock = Søcket()
-        await sock.bind('127.0.0.1', port)
-        while True:
-            message = await sock.recv()
-            print(f'sock received {message}')
-
-    loop = asyncio.get_event_loop()
-    listeners = [loop.create_task(sub(p)) for p in ports)]
-    loop.run_until_complete(asyncio.gather(*listeners))
-
-This configuration is unusual, and it's hard to think of a practical use-case
-for it. One idea might be to have your single connecting *SUB* be a
-"metrics collector" service, where it connects to a bunch of otherwise
-unrelated applications to collect some stats on CPU usage, memory usage
-and so on.
-
-Balanced work distribution (Round-robin)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-All that is different here, compared to the PUBSUB examples is that
-each message is sent to only **one** of the connected peers. The
-distribution follows a round-robin pattern where each message is sent to
-a different peer in sequence, and then it starts again from the first
-peer.
-
-This isn't really "load balancing" of course. To do load balancing properly,
-you would have to incorporate some mechanism for understanding when work
-had been completed by any particular peer. You would be able to build
-this kind of logic *on top of* ``aiomsg``.
-
-Anyway, let's see an example. This example is *exactly* the same as
-the PUBSUB example earlier, except that the "send mode" is changed:
-
-.. code-block:: python3
-
-    import asyncio
-    from aiomsg import Søcket, SendMode
-
+    # Publisher that connects
     async def main():
-        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
-        await sock.bind('127.0.0.1', 25000)
-        counter = 0
-        while True:
-            await sock.send(f'job #{counter}'.encode())
-            counter += 1
-            await asyncio.sleep(1)
+        async with Søcket(send_mode=SendMode.PUBLISH).connect() as sock:
+            while True:
+                await sock.send(b'News!')
+                await asyncio.sleep(1)
 
-    asyncio.run(main())
+The same is true for the round-robin sending mode. You will usually
+choose the *bind* peer based one which service is least likely to
+require dynamic scaling.  This means that the mental conception of
+socket peers as either a *server* or *client* is not that useful.
 
-The 10 connect sockets below, despite the code being exactly identical
-to the PUBSUB example further up, will all receive different job numbers,
-as a way of showing how work can be spread across a group of peers:
+Distribute messages to a dynamically-scaled service (multiple instances)
+------------------------------------------------------------------------
 
-.. code-block:: python3
+In this recipe, one service needs to send messages to another service
+that is horizontally scaled.
 
-    import asyncio
-    from aiomsg import Søcket
+The trick here is that we *don't* want to use bind sockets on
+horizontally-scaled services, because other peers that need to make
+a *connect* call will need to know what hostname to use.
+Each instance in a horizontally-scaled service has a different IP
+address, and it becomes difficult to keep the "connect" side up-to-date
+about which peers are available. This can also change as the
+horizontally-scaled service increases or decreases the number of
+instances. (In ZeroMQ documentation, this is described as the
+`Dynamic Discovery Problem <http://zguide.zeromq.org/page:all#The-Dynamic-Discovery-Problem>`_).
 
-    async def sub():
-        sock = Søcket()
-        await sock.connect('127.0.0.1', 25000)
-        while True:
-            message = await sock.recv()
-            print(f'sock received {message}')
+``aiomsg`` handles this very easily: just make sure that the
+dynamically-scaled service is making the connect calls:
 
-    loop = asyncio.get_event_loop()
-    listeners = [loop.create_task(sub()) for _ in range(10)
-    loop.run_until_complete(asyncio.gather(*listeners))
-
-As before with the PUBSUB scenario, we can again flip around the bind
-and connecting ends:
+This is the manually-scaled service (has a specific domain name):
 
 .. code-block:: python3
 
-    import asyncio
-    from aiomsg import Søcket
-
-    ports = range(25000, 25010)
-
+    # jobcreator.py -> DNS for "jobcreator.com" should point to this machine.
     async def main():
-        #                   This is different |(here)
-        sock = Søcket(send_mode=SendMode.ROUNDROBIN)
-        for port in ports:   # <---- Must connect to each bind address
-            await sock.connect('127.0.0.1', port)
-        counter = 0
-        while True:
-            await sock.send(f'job #{counter}'.encode())
-            counter += 1
-            await asyncio.sleep(1)
+        async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
+            sock.bind(hostname="0.0.0.0", port=25001)
+            while True:
+                await sock.send(b"job")
+                await asyncio.sleep(1)
 
-    asyncio.run(main())
-
-10 workers with *bind* sockets. Each one will get a unique job message:
+These are the downstream workers (don't need a domain name):
 
 .. code-block:: python3
 
-    import asyncio
-    from aiomsg import Søcket
+    # worker.py - > can be on any number of machines
+    async def main():
+        async with Søcket().connect(hostname='jobcreator.com', port=25001) as sock:
+            while True:
+                work = await sock.recv()
+                <do work>
 
-    ports = range(25000, 25010)
+With this code, after you start up ``jobcreator.py`` on the machine
+to which DNS resolves the domain name "jobcreator.com", you can start
+up multiple instances of ``worker.py`` on other machines, and work
+will get distributed among them. You can even change the number of
+worker instances dynamically, and everything will "just work", with
+the main instance distributing work out to all the connected workers
+in a circular pattern.
 
-    async def sub(port):
-        sock = Søcket()
-        await sock.bind('127.0.0.1', port)
-        while True:
-            message = await sock.recv()
-            print(f'sock received {message}')
+This core recipe provides a foundation on which many of the other
+recipes are built.
 
-    loop = asyncio.get_event_loop()
-    listeners = [loop.create_task(sub(p)) for p in ports)]
-    loop.run_until_complete(asyncio.gather(*listeners))
+Distribute messages from a 2-instance service to a dynamically-scaled one
+-------------------------------------------------------------------------
+
+In this scenario, there are actually two instances of the job-creating
+service, not one. This would typically be done for reliability, and
+each instance would be placed in a different `availability zones <https://searchaws.techtarget.com/definition/availability-zones>`_.
+Each instance will have a different domain name.
+
+It turns out that the required setup follows directly from the previous
+one: you just add another connect call in the workers.
+
+The manually-scaled service is as before, but you start on instance of
+``jobcreator.py`` on machine "a.jobcreator.com", and start another
+on machine "b.jobcreator.com". Obviously, it is DNS that is configured
+to point to the correct IP addresses of those machines (or you could
+use IP addresses too, if these are internal services).
+
+.. code-block:: python3
+
+    # jobcreator.py -> Configure DNS to point to these instances
+    async def main():
+        async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
+            sock.bind(hostname="0.0.0.0", port=25001)
+            while True:
+                await sock.send(b"job")
+                await asyncio.sleep(1)
+
+As before, the downstream workers, but this time each worker makes
+multiple ``connect()`` calls; one to each job creator's domain name:
+
+.. code-block:: python3
+
+    # worker.py - > can be on any number of machines
+    async def main():
+        async with Søcket() as sock:
+            sock.connect(hostname='a.jobcreator.com', port=25001)
+            sock.connect(hostname='b.jobcreator.com', port=25001)
+            while True:
+                work = await sock.recv()
+                <do work>
+
+``aiomsg`` will return ``work`` from the ``sock.recv()`` call above as
+it comes in from either job creation service. And as before, the number
+of worker instances can be dynamically scaled, up or down, and all the
+connection and reconnection logic will be handled internally.
+
+Distribute messages from one dynamically-scaled service to another
+------------------------------------------------------------------
+
+If both services need to be dynamically-scaled, and can have
+varying numbers of instances at any time, we can no longer rely
+on having one end do the *socket bind* to a dedicated domain name.
+We really would like each to make ``connect()`` calls, as we've
+seen in previous examples.
+
+How to solve it?
+
+The answer is to create an intermediate proxy service that has
+**two** bind sockets, with long-lived domain names. This is what
+will allow the other two dynamically-scaled services to have
+a dynamic number of instances.
+
+Here is the new job creator, whose name we change to ``dynamiccreator.py``
+to reflect that it is now dynamically scalable:
+
+.. code-block:: python3
+
+    # dynamiccreator.py -> can be on any number of machines
+    async def main():
+        async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
+            sock.connect(hostname="proxy.jobcreator.com", port=25001)
+            while True:
+                await sock.send(b"job")
+                await asyncio.sleep(1)
+
+Note that our job creator above is now making a ``connect()`` call to
+``proxy.jobcreator.com:25001`` rather than binding to a local port.
+Let's see what it's connecting to. Here is the intermediate proxy
+service, which needs a dedicated domain name, and two ports allocated
+for each of the bind sockets.
+
+.. code-block:: python3
+
+    # proxy.py -> Set up DNS to point "proxy.jobcreator.com" to this instance
+    async def main():
+        async with Søcket() as sock1, \
+                Søcket(send_mode=SendMode.ROUNDROBIN) as sock2:
+            sock1.bind(hostname="0.0.0.0", port=25001)
+            sock2.bind(hostname="0.0.0.0", port=25002)
+            while True:
+                work = await sock1.recv()
+                await sock2.send(work)
+
+Note that ``sock1`` is bound to port 25001; this is what our job creator
+is connecting to. The other socket, ``sock2``, is bound to port 25002, and
+this is the one that our workers will be making their ``connect()`` calls
+to. Hopefully it's clear in the code that work is being received from
+``sock1`` and being sent onto ``sock2``. This is pretty much a feature
+complete proxy service, and will only minor additions for error-handling
+can be used for real work.
+
+For completeness, here are the downstream workers:
+
+.. code-block:: python3
+
+    # worker.py - > can be on any number of machines
+    async def main():
+        async with Søcket() as sock:
+            sock.connect(hostname='proxy.jobcreator.com', port=25002)
+            while True:
+                work = await sock.recv()
+                <do work>
+
+Note that the workers are connecting to port 25002, as expected.
+
+You might be wondering: isn't this just moving our performance problem
+to a different place? If the proxy service is not scalable, then surely
+that becomes the "weakest link" in our system architecture?
+
+This is a pretty typical reaction, but there are a couple of reasons
+why it might not be as bad as you think:
+
+#. The proxy service is doing very, very little work. Thus, we expect
+   it to suffer from performance problems only at a much higher scale
+   compared to our other two services which are likely to be doing more
+   CPU-bound work (in real code, not my simple examples above).
+#. We could compile only the proxy service into faster low-level code using
+   any number of tools such as Cython, C, C++, Rust, D and so on, in order
+   to improve its performance, if necessary (this would require implementing
+   the ``aiomsg`` protocols in that other language though). This allows
+   us to retain the benefits of using a dynamic language like Python
+   in the dynamically scaled services where much greater business
+   logic is captured (these can be then be horizontally scaled quite
+   easily to handle performance issues if necessary).
+#. Performance is not the only reason services are dynamically scaled.
+   It is always a good idea, even in low-throughput services, to have
+   multiple instances of a service running in different availability zones.
+   Outages do happen, yes, even in your favourite cloud provider's
+   systems.
+#. A separate proxy service as shown above isolates a really complex
+   problem and removes it from your business logic code. It might not
+   be easy to appreciate how significant that is. As your dev team is
+   rapidly iterating on business features, and redeploying new versions
+   several times a day, the proxy service is unchanging, and doesn't
+   require redeployment. In this sense, it plays a similar role to
+   more traditional messaging systems like RabbitMQ and ActiveMQ.
+#. We can still run multiple instances of our proxy service using an
+   earlier technique, as we'll see in the next recipe.
+
+Two dynamically-scaled services, with a scaled fan-in, fan-out proxy
+--------------------------------------------------------------------
+
+This scenario is exactly like the previous one, except that we're
+nervous about having only a single proxy service, since it is a
+single point of failure.  Instead, we're going to have 3 instances of
+the proxy service running in parallel.
+
+Let's jump straight into code. The proxy code itself is actually
+unchanged from before.  We just need to run more copies of it on
+different machines. *Each machine will have a different domain name*.
+
+.. code-block:: python3
+
+    # proxy.py -> unchanged from the previous recipe
+    async def main():
+        async with Søcket() as sock1, \
+                Søcket(send_mode=SendMode.ROUNDROBIN) as sock2:
+            sock1.bind(hostname="0.0.0.0", port=25001)
+            sock2.bind(hostname="0.0.0.0", port=25002)
+            while True:
+                work = await sock1.recv()
+                await sock2.send(work)
+
+For the other two dynamically scaled services, we need to tell them
+all the domain names to connect to.  We could set that up in an
+environment variable:
+
+.. code-block:: shell
+
+    $ export PROXY_HOSTNAMES="px1.jobcreator.com;px2.jobcreator.com;px3.jobcreator.com"
+
+Then, it's really easy to modify our services to make use of that. First,
+the dynamically-scaled job creator:
+
+.. code-block:: python3
+
+    # dynamiccreator.py -> can be on any number of machines
+    async def main():
+        async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
+            for proxy in os.environ['PROXY_HOSTNAMES'].split(";"):
+                await sock.connect(hostname=proxy, port=25001)
+            while True:
+                await sock.send(b"job")
+                await asyncio.sleep(1)
+
+And the change for the worker code is identical (making sure the correct
+port is being used, 25002):
+
+.. code-block:: python3
+
+    # worker.py - > can be on any number of machines
+    async def main():
+        async with Søcket() as sock:
+            for proxy in os.environ['PROXY_HOSTNAMES'].split(";"):
+                await sock.connect(hostname=proxy, port=25002)
+            while True:
+                work = await sock.recv()
+                <do work>
+
+Three proxies, each running in a different availability zone, should
+be adequate for most common scenarios.
 
 Point-to-point (identity-based message distribution)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -596,3 +731,65 @@ The slashed O is used in homage to `ØMQ <http://zeromq.org/>`_, a truly
 wonderful library that changed my thinking around what socket programming
 could be like. Why would you use HTTP between backend systems when you
 could use this!
+
+I want to talk to the aiomsg Søcket with a different programming language
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**WARNING: This section is extremely provisional. I haven't fully
+nailed down the protocol yet.**
+
+To make a clone of the ``Søcket`` in another language is probably a
+lot of work, but it's actually not necessary to implement everything.
+
+You can talk to ``aiomsg`` sockets quite easily by implementing the
+simple protocol described below. It would be just like regular
+socket programming in your programming language. You just have to
+follow a few simple rules for the communication protocol.
+
+These are the rules:
+
+#. **Every payload** in either direction shall be length-prefixed:
+
+   .. code-block::
+
+        message = [4-bytes big endian int32] [payload]
+
+#. **Immediately** after successfully opening a TCP connection, before doing
+   anything else with your socket, you shall:
+
+    - Send your identity, as a 16 byte unique identifier (a 16 byte UUID
+      is perfect). Note that Rule 1 still applies, so this would look like
+
+      .. code-block::
+
+           identity_message = b'\x00\x00\x00\x10' + [16 bytes]
+
+      (because the length, 16, is ``0x10`` in hex)
+
+    - Receive the other peer's identity (16 bytes). Remember Rule 1.
+
+#. You shall **periodically** send a heartbeat message ``b"aiomsg-heartbeat"``.
+   Every 5 seconds is good. If you receive such messages you can ignore them.
+   If you don't receive one (or an actual data message) within 15 seconds
+   of the previous receipt,
+   the connection is probably dead and you should kill it and/or reconnect.
+   could either ignore it, or reply with exactly the same.  Note that
+   Rule 1 still applies, and because the length of this message is also
+   16 bytes, the message is ironically similar to the identity message:
+
+   .. code-block::
+
+        heartbeat_message = b'\x00\x00\x00\x10' + b'aiomsg-heartbeat'
+
+After you've satisfied these rules, from that point on every message
+sent or received is a Rule 1 message, i.e., length prefixed with 4 bytes
+for the length of the payload that follows.
+
+If you want to run a *bind* socket, and receive multiple connections from
+different ``aiomsg`` sockets, then the above rules apply to *each* separate
+connection.
+
+That's it!
+
+TODO: Discuss the protocol for ``AT_LEAST_ONCE`` mode, which is a bit messy
+at the moment.
