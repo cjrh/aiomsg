@@ -185,7 +185,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     port = portpicker.pick_unused_port()
 
     async def srv():
-        server = Søcket()
+        server = Søcket(send_mode=SendMode.PUBLISH)
         await server.bind("127.0.0.1", port, ssl_context=ctx_bind)
         try:
             while True:
@@ -204,7 +204,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         clients = []
 
         async def cnt():
-            client = Søcket()
+            client = Søcket(send_mode=SendMode.PUBLISH)
             clients.append(client)
             await client.connect("127.0.0.1", port, ssl_context=ctx_connect)
 
