@@ -116,7 +116,7 @@ class ConnectionsDict(UserDict):
 class Søcket:
     def __init__(
         self,
-        send_mode: SendMode = SendMode.PUBLISH,
+        send_mode: SendMode = SendMode.ROUNDROBIN,
         delivery_guarantee: DeliveryGuarantee = DeliveryGuarantee.AT_MOST_ONCE,
         receiver_channel: Optional[str] = None,
         identity: Optional[str] = None,
