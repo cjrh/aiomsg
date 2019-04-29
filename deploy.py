@@ -49,7 +49,7 @@ def main(args):
     sp.run(shlex.split(f"git commit -m 'Bump version to {new_version}'"), cwd=folder)
     sp.run(f"git tag v{new_version}".split(), cwd=folder)
     if args.push_git:
-        sp.run(f"git push --follow-tags".split(), cwd=folder)
+        sp.run(f"git push --follow-tags master".split(), cwd=folder)
 
     sp.run(f"{sys.executable} setup.py bdist_wheel sdist".split(), cwd=folder)
     if args.push_pypi:
