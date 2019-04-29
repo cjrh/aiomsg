@@ -554,7 +554,7 @@ is connecting to. The other socket, ``sock2``, is bound to port 25002, and
 this is the one that our workers will be making their ``connect()`` calls
 to. Hopefully it's clear in the code that work is being received from
 ``sock1`` and being sent onto ``sock2``. This is pretty much a feature
-complete proxy service, and will only minor additions for error-handling
+complete proxy service, and with only minor additions for error-handling
 can be used for real work.
 
 For completeness, here are the downstream workers:
