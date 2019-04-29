@@ -51,7 +51,7 @@ def main(args):
     if args.push_git:
         sp.run(f"git push --follow-tags".split(), cwd=folder)
 
-    sp.run(f"python setup.py bdist_wheel sdist", cwd=folder)
+    sp.run(f"python setup.py bdist_wheel sdist".split(), cwd=folder)
     if args.push_pypi:
         sp.run(f"twine upload dist/*{new_version}*", cwd=folder)
 
