@@ -41,7 +41,7 @@ def main(args):
         print(f"Repo has untracked files. Cannot continue")
         sys.exit(1)
 
-    with open(version_filename, encoding="utf-8") as f:
+    with open(version_filename, "w", encoding="utf-8") as f:
         f.write(new_version)
 
     sp.run(f"git add {version_filename}".split(), cwd=folder)
