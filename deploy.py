@@ -53,7 +53,7 @@ def main(args):
 
     sp.run(f"{sys.executable} setup.py bdist_wheel sdist".split(), cwd=folder)
     if args.push_pypi:
-        sp.run(f"twine upload dist/*{new_version}*", cwd=folder)
+        sp.run(f"twine upload --skip-existing dist/*{new_version}*", cwd=folder)
 
 
 if __name__ == "__main__":
