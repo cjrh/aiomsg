@@ -1,0 +1,9 @@
+**/.eggs
+**/node_modules
+**/*.egg-info
+**/.pytest_cache
+**/*.pyc
+**/__pycache__
+staticfiles
+**/venv*
+**/exampledata
