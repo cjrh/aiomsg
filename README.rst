@@ -65,7 +65,8 @@ Here's the end that binds to a port (a.k.a, the "server"):
     from aiomsg import Søcket
 
     async def main():
-        async with Søcket().bind('127.0.0.1', 25000) as s:
+        async with Søcket() as sock:
+            await sock.bind('127.0.0.1', 25000):
             while True:
                 await s.send(time.ctime().encode())
 
@@ -80,8 +81,9 @@ connecting (a.k.a, the "client"):
     from aiomsg import Søcket
 
     async def main():
-        async with Søcket().connect('127.0.0.1', 25000) as s:
-            async for msg in s.messages():
+        async with Søcket() as sock
+            await sock.connect('127.0.0.1', 25000):
+            async for msg in sock.messages():
                 print(msg.decode())
 
     asyncio.run(main())
@@ -95,7 +97,7 @@ further down in rest of this document.
 Inspiration
 ===========
 
-Looks a lot like `ZeroMQ <http://zeromq.org/>`_, yes? no? Well if you
+Looks a lot like ZeroMQ yes? no? Well if you
 don't know anything about
 ZeroMQ, that's fine too. The rest of this document will assume that you
 don't know anything about ZeroMQ. ``aiomsg`` is heavily influenced
@@ -161,7 +163,8 @@ the high-level features:
 
     .. code-block:: python3
 
-        async with Søcket().bind() as sock:
+        async with Søcket() as sock
+            await sock.bind():
             async for msg in sock.messages():
                 print(f"Received: {msg}")
 
@@ -181,7 +184,8 @@ the high-level features:
 
         from aiomsg import Søcket, SendMode
 
-        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock
+            await sock.bind():
             async for msg in sock.messages():
                 await sock.send(msg)
 
@@ -202,8 +206,9 @@ the high-level features:
         from aiomsg import Søcket, SendMode
 
         async def main():
-            async with Søcket().bind(port=25000) as sock1, \
-                       Søcket(send_mode=SendMode.PUBLISH).bind(port=25001) as sock2:
+            async with Søcket() as sock1, Søcket(send_mode=SendMode.PUBLISH) as sock2:
+                await sock1.bind(port=25000)
+                await sock2.bind(port=25001)
                 while True:
                     peer_id, message = await sock1.recv_identity()
                     msg_id, _, data = msg.partition(b"\x00")
@@ -259,7 +264,8 @@ the high-level features:
 
         from aiomsg import Søcket, SendMode
 
-        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock
+            await sock.bind():
             while True:
                 await sock.send(b'123)
                 await asyncio.sleep(1.0)
@@ -306,7 +312,8 @@ the high-level features:
         async with Søcket(
                 send_mode=SendMode.ROUNDROBIN,
                 delivery_guarantee=DeliveryGuarantee.AT_LEAST_ONCE
-        ).bind() as sock:
+        ) as sock:
+            await sock.bind():
             while True:
                 await sock.send(b'123)
                 await asyncio.sleep(1.0)
@@ -372,7 +379,8 @@ Compare
 
     # Publisher that binds
     async def main():
-        async with Søcket(send_mode=SendMode.PUBLISH).bind() as sock:
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock:
+            await sock.bind():
             while True:
                 await sock.send(b'News!')
                 await asyncio.sleep(1)
@@ -383,7 +391,8 @@ versus
 
     # Publisher that connects
     async def main():
-        async with Søcket(send_mode=SendMode.PUBLISH).connect() as sock:
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock:
+            await sock.connect():
             while True:
                 await sock.send(b'News!')
                 await asyncio.sleep(1)
@@ -419,7 +428,7 @@ This is the manually-scaled service (has a specific domain name):
     # jobcreator.py -> DNS for "jobcreator.com" should point to this machine.
     async def main():
         async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
-            sock.bind(hostname="0.0.0.0", port=25001)
+            await sock.bind(hostname="0.0.0.0", port=25001)
             while True:
                 await sock.send(b"job")
                 await asyncio.sleep(1)
@@ -430,7 +439,8 @@ These are the downstream workers (don't need a domain name):
 
     # worker.py - > can be on any number of machines
     async def main():
-        async with Søcket().connect(hostname='jobcreator.com', port=25001) as sock:
+        async with Søcket() as sock
+            await sock.connect(hostname='jobcreator.com', port=25001):
             while True:
                 work = await sock.recv()
                 <do work>
@@ -468,7 +478,7 @@ use IP addresses too, if these are internal services).
     # jobcreator.py -> Configure DNS to point to these instances
     async def main():
         async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
-            sock.bind(hostname="0.0.0.0", port=25001)
+            await sock.bind(hostname="0.0.0.0", port=25001)
             while True:
                 await sock.send(b"job")
                 await asyncio.sleep(1)
@@ -481,8 +491,8 @@ multiple ``connect()`` calls; one to each job creator's domain name:
     # worker.py - > can be on any number of machines
     async def main():
         async with Søcket() as sock:
-            sock.connect(hostname='a.jobcreator.com', port=25001)
-            sock.connect(hostname='b.jobcreator.com', port=25001)
+            await sock.connect(hostname='a.jobcreator.com', port=25001)
+            await sock.connect(hostname='b.jobcreator.com', port=25001)
             while True:
                 work = await sock.recv()
                 <do work>
@@ -516,7 +526,7 @@ to reflect that it is now dynamically scalable:
     # dynamiccreator.py -> can be on any number of machines
     async def main():
         async with Søcket(send_mode=SendMode.ROUNDROBIN) as sock:
-            sock.connect(hostname="proxy.jobcreator.com", port=25001)
+            await sock.connect(hostname="proxy.jobcreator.com", port=25001)
             while True:
                 await sock.send(b"job")
                 await asyncio.sleep(1)
@@ -533,8 +543,8 @@ for each of the bind sockets.
     async def main():
         async with Søcket() as sock1, \
                 Søcket(send_mode=SendMode.ROUNDROBIN) as sock2:
-            sock1.bind(hostname="0.0.0.0", port=25001)
-            sock2.bind(hostname="0.0.0.0", port=25002)
+            await sock1.bind(hostname="0.0.0.0", port=25001)
+            await sock2.bind(hostname="0.0.0.0", port=25002)
             while True:
                 work = await sock1.recv()
                 await sock2.send(work)
@@ -554,7 +564,7 @@ For completeness, here are the downstream workers:
     # worker.py - > can be on any number of machines
     async def main():
         async with Søcket() as sock:
-            sock.connect(hostname='proxy.jobcreator.com', port=25002)
+            await sock.connect(hostname='proxy.jobcreator.com', port=25002)
             while True:
                 work = await sock.recv()
                 <do work>
@@ -613,8 +623,8 @@ different machines. *Each machine will have a different domain name*.
     async def main():
         async with Søcket() as sock1, \
                 Søcket(send_mode=SendMode.ROUNDROBIN) as sock2:
-            sock1.bind(hostname="0.0.0.0", port=25001)
-            sock2.bind(hostname="0.0.0.0", port=25002)
+            await sock1.bind(hostname="0.0.0.0", port=25001)
+            await sock2.bind(hostname="0.0.0.0", port=25002)
             while True:
                 work = await sock1.recv()
                 await sock2.send(work)
