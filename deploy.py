@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+import sys
 import argparse
 from pathlib import Path
 import subprocess as sp
 
 
 def main(args):
-    print(args)
-    if args.dry_run:
-        print("Dry run active!")
+    args.debug and print(args)
+    args.dry_run and print("Dry run active!")
 
     folder = Path(__file__).parent
     version_filename = folder / "VERSION"
@@ -32,19 +32,32 @@ def main(args):
         print(f"The new version that would be written: {new_version}")
         return
 
+    git_status_output = sp.run("git status".split(), capture_output=True).stdout
+    if b"Changes not staged for commit:" in git_status_output:
+        print(f"Repo has uncommitted changes. Cannot continue")
+        sys.exit(1)
+
+    if b"Untracked files:" in git_status_output:
+        print(f"Repo has untracked files. Cannot continue")
+        sys.exit(1)
+
     with open(version_filename, encoding="utf-8") as f:
         f.write(new_version)
 
     sp.run(f"git add {version_filename}".split(), cwd=folder)
     sp.run(f"git commit -m 'Bump version to {new_version}'".split(), cwd=folder)
     sp.run(f"git tag v{new_version}".split(), cwd=folder)
-    sp.run(f"git push --follow-tags".split(), cwd=folder)
+    if args.push_git:
+        sp.run(f"git push --follow-tags".split(), cwd=folder)
+
     sp.run(f"python setup.py bdist_wheel sdist", cwd=folder)
-    sp.run(f"twine upload dist/*{new_version}*", cwd=folder)
+    if args.push_pypi:
+        sp.run(f"twine upload dist/*{new_version}*", cwd=folder)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--push-git", action="store_true")
