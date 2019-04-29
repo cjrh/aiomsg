@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import shlex
 import argparse
 from pathlib import Path
 import subprocess as sp
@@ -45,7 +46,7 @@ def main(args):
         f.write(new_version)
 
     sp.run(f"git add {version_filename}".split(), cwd=folder)
-    sp.run(f"git commit -m 'Bump version to {new_version}'".split(), cwd=folder)
+    sp.run(shlex.split(f"git commit -m 'Bump version to {new_version}'"), cwd=folder)
     sp.run(f"git tag v{new_version}".split(), cwd=folder)
     if args.push_git:
         sp.run(f"git push --follow-tags".split(), cwd=folder)
