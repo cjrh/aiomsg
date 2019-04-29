@@ -19,8 +19,11 @@ def main(args):
     major, minor, patch, *_ = version.split(".")
     if "major" in args.field:
         major = int(major) + 1
+        minor = 0
+        patch = 0
     if "minor" in args.field:
         minor = int(minor) + 1
+        patch = 0
     if "patch" in args.field or not args.field:
         patch = int(patch) + 1
     new_version = f"{major}.{minor}.{patch}"
@@ -35,7 +38,7 @@ def main(args):
     sp.run(f"git add {version_filename}".split(), cwd=folder)
     sp.run(f"git commit -m 'Bump version to {new_version}'".split(), cwd=folder)
     sp.run(f"git tag v{new_version}".split(), cwd=folder)
-    # sp.run(f"git push --tags")
+    sp.run(f"git push --follow-tags".split(), cwd=folder)
     sp.run(f"python setup.py bdist_wheel sdist", cwd=folder)
     sp.run(f"twine upload dist/*{new_version}*", cwd=folder)
 
