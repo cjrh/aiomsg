@@ -25,12 +25,15 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(scope="module")
 def ssl_contexts():
-    name = str(uuid.uuid4().hex)
+    name1 = str(uuid.uuid4().hex)
+    name2 = str(uuid.uuid4().hex)
     import pathlib
 
     pwd = pathlib.Path().absolute()
-    cert_filename = f"{name}.crt"
-    key_filename = f"{name}.key"
+    cert_filename1 = f"{name1}.crt"
+    key_filename1 = f"{name1}.key"
+    cert_filename2 = f"{name2}.crt"
+    key_filename2 = f"{name2}.key"
     # https://stackoverflow.com/a/43860138
     # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
     #   -keyout example.key -out example.crt \
@@ -41,8 +44,14 @@ def ssl_contexts():
     #             echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) \
     #   -subj /CN=example.com
     cmd = (
-        f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename} "
-        f"-x509 -days 365 -out {cert_filename} "
+        f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename1} "
+        f"-x509 -days 365 -out {cert_filename1} "
+        "-subj '/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com'"
+    )
+    out = sp.run(shlex.split(cmd), stdout=sp.PIPE)
+    cmd = (
+        f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename2} "
+        f"-x509 -days 365 -out {cert_filename2} "
         "-subj '/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com'"
     )
     out = sp.run(shlex.split(cmd), stdout=sp.PIPE)
@@ -50,17 +59,20 @@ def ssl_contexts():
     try:
         ctx_bind = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx_bind.check_hostname = False
-        ctx_bind.load_cert_chain(certfile=cert_filename, keyfile=key_filename)
+        ctx_bind.load_verify_locations(cert_filename1)
+        ctx_bind.load_cert_chain(certfile=cert_filename1, keyfile=key_filename1)
 
         ctx_connect = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ctx_connect.check_hostname = False
-        ctx_connect.load_verify_locations(cert_filename)
-        ctx_connect.load_cert_chain(certfile=cert_filename, keyfile=key_filename)
+        ctx_connect.load_verify_locations(cert_filename1)
+        ctx_connect.load_cert_chain(certfile=cert_filename1, keyfile=key_filename1)
 
-        yield ctx_bind, ctx_connect, str(pwd / cert_filename), str(pwd / key_filename)
+        yield ctx_bind, ctx_connect, str(pwd / cert_filename1), str(pwd / key_filename1)
     finally:
-        os.unlink(cert_filename)
-        os.unlink(key_filename)
+        os.unlink(cert_filename1)
+        os.unlink(key_filename1)
+        os.unlink(cert_filename2)
+        os.unlink(key_filename2)
 
 
 @pytest.mark.parametrize("bind_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
