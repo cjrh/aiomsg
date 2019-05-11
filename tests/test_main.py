@@ -30,10 +30,10 @@ def ssl_contexts():
     import pathlib
 
     pwd = pathlib.Path().absolute()
-    cert_filename1 = f"{name1}.crt"
-    key_filename1 = f"{name1}.key"
-    cert_filename2 = f"{name2}.crt"
-    key_filename2 = f"{name2}.key"
+    cert_server = f"{name1}.crt"
+    key_server = f"{name1}.key"
+    cert_client = f"{name2}.crt"
+    key_client = f"{name2}.key"
     # https://stackoverflow.com/a/43860138
     # openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
     #   -keyout example.key -out example.crt \
@@ -44,14 +44,14 @@ def ssl_contexts():
     #             echo subjectAltName=DNS:example.com,DNS:example.net,IP:10.0.0.1) \
     #   -subj /CN=example.com
     cmd = (
-        f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename1} "
-        f"-x509 -days 365 -out {cert_filename1} "
+        f"openssl req -newkey rsa:2048 -nodes -keyout {key_server} "
+        f"-x509 -days 365 -out {cert_server} "
         "-subj '/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com'"
     )
     out = sp.run(shlex.split(cmd), stdout=sp.PIPE)
     cmd = (
-        f"openssl req -newkey rsa:2048 -nodes -keyout {key_filename2} "
-        f"-x509 -days 365 -out {cert_filename2} "
+        f"openssl req -newkey rsa:2048 -nodes -keyout {key_client} "
+        f"-x509 -days 365 -out {cert_client} "
         "-subj '/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com'"
     )
     out = sp.run(shlex.split(cmd), stdout=sp.PIPE)
@@ -59,20 +59,22 @@ def ssl_contexts():
     try:
         ctx_bind = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx_bind.check_hostname = False
-        ctx_bind.load_verify_locations(cert_filename1)
-        ctx_bind.load_cert_chain(certfile=cert_filename1, keyfile=key_filename1)
+        ctx_bind.verify_mode = ssl.CERT_REQUIRED
+        ctx_bind.load_verify_locations(cert_client)
+        ctx_bind.load_cert_chain(certfile=cert_server, keyfile=key_server)
 
         ctx_connect = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ctx_connect.check_hostname = False
-        ctx_connect.load_verify_locations(cert_filename1)
-        ctx_connect.load_cert_chain(certfile=cert_filename1, keyfile=key_filename1)
+        ctx_connect.verify_mode = ssl.CERT_REQUIRED
+        ctx_connect.load_verify_locations(cert_server)
+        ctx_connect.load_cert_chain(certfile=cert_client, keyfile=key_client)
 
-        yield ctx_bind, ctx_connect, str(pwd / cert_filename1), str(pwd / key_filename1)
+        yield ctx_bind, ctx_connect, str(pwd / cert_server), str(pwd / key_server)
     finally:
-        os.unlink(cert_filename1)
-        os.unlink(key_filename1)
-        os.unlink(cert_filename2)
-        os.unlink(key_filename2)
+        os.unlink(cert_server)
+        os.unlink(key_server)
+        os.unlink(cert_client)
+        os.unlink(key_client)
 
 
 @pytest.mark.parametrize("bind_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
