@@ -678,8 +678,7 @@ Why do you spell ``Søcket`` like that?
 
 The slashed O is used in homage to `ØMQ <http://zeromq.org/>`_, a truly
 wonderful library that changed my thinking around what socket programming
-could be like. Why would you use HTTP between backend systems when you
-could use this!
+could be like.
 
 I want to talk to the aiomsg Søcket with a different programming language
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -701,30 +700,32 @@ These are the rules:
 
    .. code-block::
 
-        message = [4-bytes big endian int32] [payload]
+        message = [4-bytes big endian int32][payload]
 
 #. **Immediately** after successfully opening a TCP connection, before doing
    anything else with your socket, you shall:
 
-    - Send your identity, as a 16 byte unique identifier (a 16 byte UUID
+    - Send your identity, as a 16 byte unique identifier (a 16 byte UUID4
       is perfect). Note that Rule 1 still applies, so this would look like
 
       .. code-block::
 
            identity_message = b'\x00\x00\x00\x10' + [16 bytes]
 
-      (because the length, 16, is ``0x10`` in hex)
+      (because the payload length, 16, is ``0x10`` in hex)
 
-    - Receive the other peer's identity (16 bytes). Remember Rule 1.
+    - Receive the other peer's identity (16 bytes). Remember Rule 1 still
+      applies, so you'll actually receive 20 bytes, and the first four will
+      be the length of the payload, which will be 16 bytes for this message.
 
 #. You shall **periodically** send a heartbeat message ``b"aiomsg-heartbeat"``.
    Every 5 seconds is good. If you receive such messages you can ignore them.
    If you don't receive one (or an actual data message) within 15 seconds
    of the previous receipt,
    the connection is probably dead and you should kill it and/or reconnect.
-   could either ignore it, or reply with exactly the same.  Note that
-   Rule 1 still applies, and because the length of this message is also
-   16 bytes, the message is ironically similar to the identity message:
+   Note that Rule 1 still applies, and because the length of this message
+   is also 16 bytes, the message is ironically similar to the identity
+   message:
 
    .. code-block::
 
@@ -742,3 +743,30 @@ That's it!
 
 TODO: Discuss the protocol for ``AT_LEAST_ONCE`` mode, which is a bit messy
 at the moment.
+
+Developer setup
+---------------
+
+1. Setup::
+
+    $ git clone https://github.com/cjrh/aiomsg
+    $ python -m venv venv
+    $ source venv/bin/activate  (or venv/Scripts/activate.bat on Windows)
+    $ pip install -e .[all]
+
+2. Run the tests::
+
+    $ pytest
+
+3. Create a new release::
+
+    $ bumpymcbumpface --push-git --push-pypi
+
+The easiest way to obtain the
+`bumpymcbumpface <https://pypi.org/project/bumpymcbumpface/>`_ tool is
+to install it with `pipx <https://github.com/pipxproject/pipx>`_. Once installed
+and on your ``$PATH``, the command above should work. **NOTE: twine must be
+correctly configured to upload to pypi.**  If you don't have rights to
+push to PyPI, but you do have rights to push to github, just omit
+the ``--push-pypi`` option in the command above. The command will
+automatically create the next git tag and push it.
