@@ -65,6 +65,10 @@ def ssl_contexts():
 
         ctx_connect = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ctx_connect.check_hostname = False
+        # If check_hostname is true, it would also require that the
+        # server_hostname be set for the connect end. By default, the `host`
+        # parameter will be used as the server hostname in the
+        # `open_connection` call that aiomsg does, in the internals.
         ctx_connect.verify_mode = ssl.CERT_REQUIRED
         ctx_connect.load_verify_locations(cert_server)
         ctx_connect.load_cert_chain(certfile=cert_client, keyfile=key_client)
