@@ -17,6 +17,6 @@ matrix:
 install:
     - "pip install -r requirements-test.txt"
 script:
-    PYTHONPATH=. py.test -vv -s --cov
+    PYTHONPATH=. py.test -vv --cov
 after_success:
     coveralls
