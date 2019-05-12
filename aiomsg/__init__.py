@@ -210,7 +210,7 @@ class Søcket:
 
                     logger.info("Connection dropped, reconnecting.")
 
-        self._tasks.add(self.loop.create_task(connect_with_retry()))
+        self.loop.create_task(connect_with_retry())
         return self
 
     async def messages(self) -> AsyncGenerator[bytes, None]:
