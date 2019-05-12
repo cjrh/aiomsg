@@ -680,9 +680,7 @@ class Connection:
 
         try:
             await asyncio.wait(
-                [self.reader_task, self.writer_task],
-                loop=self.loop,
-                return_when=asyncio.ALL_COMPLETED,
+                [self.reader_task, self.writer_task], return_when=asyncio.ALL_COMPLETED
             )
         except asyncio.CancelledError:
             self.reader_task.cancel()
