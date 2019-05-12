@@ -40,6 +40,8 @@ def conn_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Søck
     with new_sock(**kwargs) as sock:
         run(sock.connect(host, port, ssl_context=ssl_context))
         yield sock
+        logger.debug("leaving new_sock context")
+    logger.debug("leaving conn_sock context")
 
 
 async def sock_receiver(message_type: str, sock: Søcket):
