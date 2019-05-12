@@ -176,8 +176,10 @@ class Søcket:
     ):
         self.check_socket_type()
 
-        async def _make_connection():
-            reader = writer = None
+        async def new_connection():
+            """Called each time a new connection is attempted. This
+            suspend while the connection is up."""
+            writer = None
             try:
                 logger.debug("Attempting to open connection")
                 reader, writer = await asyncio.open_connection(
@@ -186,14 +188,18 @@ class Søcket:
                 logger.info(f"Socket {self.identity} connected.")
                 await self._connection(reader, writer)
             finally:
+                logger.info(f"Socket {self.identity} disconnected.")
                 if writer:
                     await version_utils.stream_close(writer)
 
         async def connect_with_retry():
+            """This is a long-running task that is intended to run
+            for the life of the Socket object. It will continually
+            try to connect."""
             logger.info(f"Socket {self.identity} connecting to {hostname}:{port}")
             while not self.closed:
                 try:
-                    await _make_connection()
+                    await new_connection()
                     if self.closed:
                         break
                 except ConnectionError:
@@ -207,8 +213,6 @@ class Søcket:
                     break
                 except Exception:
                     logger.exception("Unexpected error")
-                    if self.closed:
-                        break
 
         self.loop.create_task(connect_with_retry())
         return self
