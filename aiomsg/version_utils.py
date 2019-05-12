@@ -27,5 +27,7 @@ async def stream_write(stream: StreamWriter, data):
         # https://docs.python.org/3.7/library/asyncio-stream.html#asyncio.StreamWriter.drain
         await stream.drain()
     else:
+        stream.write(data)
+        await stream.drain()
         # https://docs.python.org/3.8/library/asyncio-stream.html#asyncio.StreamWriter.write
-        await stream.write(data)
+        # await stream.write(data)
