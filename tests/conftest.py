@@ -18,7 +18,7 @@ def loop():
     else:
         ev: asyncio.AbstractEventLoop = asyncio.new_event_loop()
 
-    ev.set_debug(True)
+    # ev.set_debug(True)
     asyncio.set_event_loop(ev)
     try:
         yield ev
