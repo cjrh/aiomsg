@@ -202,6 +202,7 @@ class Søcket:
                     break
                 except:
                     logger.exception("Unexpected Exception!")
+                    raise
                 finally:
                     try:
                         await version_utils.stream_close(writer)
