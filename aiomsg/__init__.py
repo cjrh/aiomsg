@@ -189,7 +189,7 @@ class Søcket:
                         break
                     else:
                         logger.warning("Connection error, reconnecting...")
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(0.1)
                         continue
 
                 logger.info("Connected.")
