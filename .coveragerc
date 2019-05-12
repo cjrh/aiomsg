@@ -2,3 +2,5 @@
 branch = True
 include =
     aiomsg/*
+omit =
+    aiomsg/version_utils.py
