@@ -362,7 +362,6 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     TODO: Do we want this delivery guarantee thing to also apply to
      the PUBLISH send mode?
 
-    TODO: Include SSL
     """
     ctx_args = []
     ctx_connect = None
@@ -479,7 +478,10 @@ def test_connection(loop):
 
         async def cb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             nonlocal cb_task
-            cb_task = asyncio.Task.current_task()
+            if sys.version_info <= (3, 7):
+                cb_task = asyncio.Task.current_task()
+            else:
+                cb_task = asyncio.current_task()
             try:
                 while True:
                     try:
