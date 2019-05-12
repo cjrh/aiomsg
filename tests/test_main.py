@@ -271,9 +271,9 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
     receipts = defaultdict(list)
     port = portpicker.pick_unused_port()
     with bind_sock(identity="server", port=port, ssl_context=ctx_bind) as server:
-        with conn_sock(
-            identity="c1", port=port, ssl_context=ctx_connect
-        ) as c1, conn_sock(identity="c2", port=port, ssl_context=ctx_connect) as c2:
+        cm1 = conn_sock(identity="c1", port=port, ssl_context=ctx_connect)
+        cm2 = conn_sock(identity="c2", port=port, ssl_context=ctx_connect)
+        with cm1 as c1, cm2 as c2:
 
             async def c1listen():
                 with suppress(asyncio.CancelledError):
@@ -306,7 +306,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             t1 = loop.create_task(c1listen())
             t2 = loop.create_task(c2listen())
 
-            loop.run_until_complete(srvsend())
+            loop.run_until_complete(asyncio.wait_for(srvsend(), 30.0))
 
             t1.cancel()
             t2.cancel()
