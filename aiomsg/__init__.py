@@ -203,7 +203,6 @@ class Søcket:
                 except:
                     logger.exception("Unexpected Exception!")
                 finally:
-                    print("WRITER:", writer)
                     try:
                         await version_utils.stream_close(writer)
                     except:
