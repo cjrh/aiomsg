@@ -5,6 +5,7 @@ import pytest
 
 logging.basicConfig(
     level="DEBUG",
+    # This formatter will produce clickable links in the PyCharm run window.
     format='%(relativeCreated)6d  %(funcName)20s() %(name)s %(levelname)10s %(message)s "%(pathname)s:%(lineno)d"',
     stream=sys.stdout,
 )
@@ -18,7 +19,6 @@ def loop():
     else:
         ev: asyncio.AbstractEventLoop = asyncio.new_event_loop()
 
-    # ev.set_debug(True)
     asyncio.set_event_loop(ev)
     try:
         yield ev
