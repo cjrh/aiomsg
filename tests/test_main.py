@@ -314,7 +314,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             loop.run_until_complete(asyncio.gather(t1, t2))
 
     print("waiting for everything to finish up")
-    loop.run_until_complete(asyncio.sleep(1))
+    loop.run_until_complete(asyncio.sleep(2))
 
     assert sum(len(v) for v in sends.values()) == size
     assert sum(len(v) for v in receipts.values()) == size
