@@ -45,6 +45,7 @@ from enum import Enum, auto
 from asyncio import StreamReader, StreamWriter
 from collections import UserDict
 from itertools import cycle
+from ssl import SSLContext
 from weakref import WeakSet
 from typing import (
     Dict,
@@ -122,6 +123,9 @@ class Søcket:
         receiver_channel: Optional[str] = None,
         identity: Optional[str] = None,
         loop=None,
+        # These two are mutually exclusive
+        bind: Optional[Tuple[str, int, SSLContext]] = None,
+        connect: Optional[Tuple[str, int, SSLContext]] = None,
     ):
         self._tasks = WeakSet()
         self.send_mode = send_mode
@@ -150,6 +154,15 @@ class Søcket:
             self.sender_handler = self._sender_robin
         else:  # pragma: no cover
             raise Exception("Unknown send mode.")
+
+        # These get used in the context manager version
+        if bind:
+            assert not connect
+            self.bind_args = bind
+
+        if connect:
+            assert not bind
+            self.connect_args = connect
 
     async def bind(
         self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
@@ -551,6 +564,11 @@ class Søcket:
         ), f"Socket type has already been set: {self.socket_type}"
 
     async def __aenter__(self):
+        if hasattr(self, "bind_args"):
+            await self.bind(*self.bind_args)
+        elif hasattr(self, "connect_args"):
+            await self.connect(*self.connect_args)
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

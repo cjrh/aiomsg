@@ -573,10 +573,9 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
 
         async def client_recv():
             # 1. Context manager for the socket
-            async with aiomsg.Søcket(send_mode=conn_send_mode) as s:
-                # 2. Gotta do the connect call
-                await s.connect(port=port, ssl_context=ctx_connect)
-                # 3. async for to get the received messages one by one.
+            async with aiomsg.Søcket(
+                send_mode=conn_send_mode, connect=("127.0.0.1", port, ctx_connect)
+            ) as s:
                 async for msg in s.messages():
                     received.append(msg)
                     print(f"Client received: {msg}")
