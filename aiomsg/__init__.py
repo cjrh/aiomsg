@@ -59,6 +59,7 @@ from typing import (
 
 from aiomsg import header
 from . import msgproto
+from . import version_utils
 
 __all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
 
@@ -179,6 +180,7 @@ class Søcket:
             logger.info(f"Socket {self.identity} connecting to {hostname}:{port}")
             while not self.closed:
                 try:
+                    logger.debug("Attempting to open connection")
                     reader, writer = await asyncio.open_connection(
                         hostname, port, loop=self.loop, ssl=ssl_context
                     )
@@ -193,8 +195,21 @@ class Søcket:
                         continue
 
                 logger.info("Connected.")
-                await self._connection(reader, writer)
-                logger.info("Connection dropped, reconnecting.")
+                try:
+                    await self._connection(reader, writer)
+                except asyncio.CancelledError:
+                    # Cancellation is not how to shut this task down, but ok.
+                    break
+                except:
+                    logger.exception("Unexpected Exception!")
+                finally:
+                    print("WRITER:", writer)
+                    try:
+                        await version_utils.stream_close(writer)
+                    except:
+                        logger.exception("Unexpected Exception!")
+
+                    logger.info("Connection dropped, reconnecting.")
 
         self._tasks.add(self.loop.create_task(connect_with_retry()))
         return self
@@ -664,14 +679,6 @@ class Connection:
                     break
             except Exception as e:
                 logger.error(f"Unhandled error: {e}")
-
-        try:
-            self.writer.close()
-            if sys.version_info >= (3, 7):
-                # noinspection PyUnresolvedReferences
-                await self.writer.wait_closed()
-        except Exception as e:
-            logger.error(f"Unhandled error: {e}")
 
     async def run(self):
         logger.info(f"Connection {self.identity} running.")
