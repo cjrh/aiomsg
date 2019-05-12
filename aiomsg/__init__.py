@@ -176,40 +176,39 @@ class Søcket:
     ):
         self.check_socket_type()
 
+        async def _make_connection():
+            reader = writer = None
+            try:
+                logger.debug("Attempting to open connection")
+                reader, writer = await asyncio.open_connection(
+                    hostname, port, loop=self.loop, ssl=ssl_context
+                )
+                logger.info(f"Socket {self.identity} connected.")
+                await self._connection(reader, writer)
+            finally:
+                if writer:
+                    await version_utils.stream_close(writer)
+
         async def connect_with_retry():
             logger.info(f"Socket {self.identity} connecting to {hostname}:{port}")
             while not self.closed:
                 try:
-                    logger.debug("Attempting to open connection")
-                    reader, writer = await asyncio.open_connection(
-                        hostname, port, loop=self.loop, ssl=ssl_context
-                    )
-                    logger.info(f"Socket {self.identity} connected.")
+                    await _make_connection()
+                    if self.closed:
+                        break
                 except ConnectionError:
-                    logger.debug("Client connect error")
                     if self.closed:
                         break
                     else:
                         logger.warning("Connection error, reconnecting...")
                         await asyncio.sleep(0.1)
                         continue
-
-                logger.info("Connected.")
-                try:
-                    await self._connection(reader, writer)
                 except asyncio.CancelledError:
-                    # Cancellation is not how to shut this task down, but ok.
                     break
-                except:
-                    logger.exception("Unexpected Exception!")
-                    raise
-                finally:
-                    try:
-                        await version_utils.stream_close(writer)
-                    except:
-                        logger.exception("Unexpected Exception!")
-
-                    logger.info("Connection dropped, reconnecting.")
+                except Exception:
+                    logger.exception("Unexpected error")
+                    if self.closed:
+                        break
 
         self.loop.create_task(connect_with_retry())
         return self
