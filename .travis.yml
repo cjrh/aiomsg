@@ -7,8 +7,6 @@ matrix:
     dist: xenial
   - python: "3.8-dev"
     dist: xenial
-  - python: "pypy3.5"
-    dist: xenial
   - python: "nightly"
     dist: xenial
   - name: "Python on Windows"
@@ -16,12 +14,9 @@ matrix:
     language: shell
     before_install: choco install python
     env: PATH=/c/Python37:/c/Python37/Scripts:$PATH
-  - name: "Python on macOS"
-    os: osx
-    osx_image: xcode10.2
 install:
     - "pip install -r requirements-test.txt"
 script:
-    PYTHONPATH=. py.test -vv --cov
+    PYTHONPATH=. py.test -vv -s --cov
 after_success:
     coveralls
