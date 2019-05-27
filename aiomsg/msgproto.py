@@ -7,7 +7,7 @@ These are messaging protocols
 """
 
 import logging
-from asyncio import StreamReader, StreamWriter, IncompleteReadError
+from asyncio import StreamReader, StreamWriter
 
 logger = logging.getLogger(__name__)
 _PREFIX_SIZE = 4
@@ -21,12 +21,7 @@ async def read_msg(reader: StreamReader) -> bytes:
         data = await reader.readexactly(size)
         logger.debug(f'Got data from socket: "{data[:64]}"')
         return data
-    except (
-        IncompleteReadError,
-        ConnectionResetError,
-        ConnectionAbortedError,
-        BrokenPipeError,
-    ) as e:
+    except (EOFError, OSError) as e:
         logger.info(f"Connection lost: {e}")
         return b""
 
