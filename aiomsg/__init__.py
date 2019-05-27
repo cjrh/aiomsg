@@ -202,7 +202,7 @@ class Søcket:
                     await new_connection()
                     if self.closed:
                         break
-                except ConnectionError:
+                except OSError:
                     if self.closed:
                         break
                     else:
@@ -669,7 +669,7 @@ class Connection:
                 try:
                     await self.send_wait(message)
                     logger.debug("Sent message")
-                except ConnectionError as e:
+                except OSError as e:
                     logger.error(
                         f"Connection {self.identity} aborted, dropping "
                         f"message: {message[:50]}...{message[-50:]}\n"
