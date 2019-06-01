@@ -64,8 +64,6 @@ from . import version_utils
 __all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
 
 logger = logging.getLogger(__name__)
-slogger = logging.getLogger(__name__ + ".server")
-clogger = logging.getLogger(__name__ + ".client")
 SEND_MODES = ["round_robin", "publish"]
 JSONCompatible = Union[str, int, float, bool, List, Dict, None]
 
