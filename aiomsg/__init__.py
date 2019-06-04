@@ -36,7 +36,6 @@ Run tests with watchmedo (available after ``pip install Watchdog`` ):
         -p '*.py'
 
 """
-import sys
 import logging
 import asyncio
 import uuid
@@ -47,6 +46,7 @@ from collections import UserDict
 from itertools import cycle
 from ssl import SSLContext
 from weakref import WeakSet
+from dataclasses import dataclass
 from typing import (
     Dict,
     Optional,
@@ -56,6 +56,9 @@ from typing import (
     AsyncGenerator,
     Callable,
     MutableMapping,
+    Set,
+    NamedTuple,
+    Union,
 )
 
 from aiomsg import header
@@ -86,6 +89,58 @@ class ConnectionEnd(Enum):
 class DeliveryGuarantee(Enum):
     AT_MOST_ONCE = auto()
     AT_LEAST_ONCE = auto()
+
+
+class Host(NamedTuple):
+    name: str = "localhost"
+    port: int = 25001
+
+
+class BindData(NamedTuple):
+    host: Host = Host()
+    ssl_cert_filename: Optional[str] = None
+    ssl_key_filename: Optional[str] = None
+
+
+class ConnectData(NamedTuple):
+    hosts: Set[Host] = {Host()}
+    ssl_cert_filename: Optional[str] = None
+    ssl_key_filename: Optional[str] = None
+
+
+class SSLVerifyLocations(NamedTuple):
+    cafile: Optional[str] = None
+    capath: Optional[str] = None
+    cadata: Optional[str] = None
+
+
+class Config(NamedTuple):
+    connection_end: ConnectionEnd
+    send_mode: SendMode = SendMode.ROUNDROBIN
+    delivery_guarantee: DeliveryGuarantee = DeliveryGuarantee.AT_MOST_ONCE
+
+    # Adjustments
+    receive_queue_maxsize: Optional[int] = 65536
+
+    # Parameters for `load_cert_chain()`
+    certfile: Optional[str] = None
+    keyfile: Optional[str] = None
+
+    # Parameters for `load_verify_locations()`. If any of these are set,
+    # then `verify_mode = ssl.CERT_REQUIRED` will be set.
+    cafile: Optional[str] = None
+    capath: Optional[str] = None
+    cadata: Optional[str] = None
+
+    # Parameter only used for connecting sockets
+    check_hostname: Optional[bool] = True
+
+    @classmethod
+    def from_json(cls, data: str):
+        return cls(**json.loads(data))
+
+    def to_json(self) -> str:
+        return json.dumps({k: v for k, v in self._asdict().items() if v is not None})
 
 
 class ConnectionsDict(UserDict):

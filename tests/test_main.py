@@ -58,13 +58,13 @@ def ssl_contexts():
     assert out.returncode == 0
     try:
         ctx_bind = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ctx_bind.check_hostname = False
+        ctx_bind.check_hostname = False  # Not actually required on the bind end
         ctx_bind.verify_mode = ssl.CERT_REQUIRED
         ctx_bind.load_verify_locations(cert_client)
         ctx_bind.load_cert_chain(certfile=cert_server, keyfile=key_server)
 
         ctx_connect = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-        ctx_connect.check_hostname = False
+        ctx_connect.check_hostname = False  # In prod this should be true
         # If check_hostname is true, it would also require that the
         # server_hostname be set for the connect end. By default, the `host`
         # parameter will be used as the server hostname in the
