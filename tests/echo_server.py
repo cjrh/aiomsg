@@ -25,7 +25,7 @@ async def main(args):
     async with Søcket(
         send_mode=SendMode.ROUNDROBIN,
         delivery_guarantee=DeliveryGuarantee.AT_LEAST_ONCE,
-        identity=args.identity,
+        identity=bytes.fromhex(args.identity),
     ) as s:
         await s.bind(hostname=args.hostname, port=args.port, ssl_context=ctx)
 

@@ -2,7 +2,7 @@ from asyncio import StreamWriter
 import sys
 
 
-async def stream_close(stream: StreamWriter):
+async def stream_close(stream: StreamWriter):  # pragma: no cover
     if sys.version_info < (3, 7):
         # https://docs.python.org/3.6/library/asyncio-stream.html#asyncio.StreamWriter.close
         stream.close()
@@ -18,7 +18,7 @@ async def stream_close(stream: StreamWriter):
         # await stream.close()
 
 
-async def stream_write(stream: StreamWriter, data):
+async def stream_write(stream: StreamWriter, data):  # pragma: no cover
     if sys.version_info < (3, 8):
         # https://docs.python.org/3.6/library/asyncio-stream.html#asyncio.StreamWriter.write
         # https://docs.python.org/3.7/library/asyncio-stream.html#asyncio.StreamWriter.write

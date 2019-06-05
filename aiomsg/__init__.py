@@ -36,7 +36,6 @@ Run tests with watchmedo (available after ``pip install Watchdog`` ):
         -p '*.py'
 
 """
-import sys
 import logging
 import asyncio
 import uuid
@@ -55,6 +54,7 @@ from typing import (
     AsyncGenerator,
     Callable,
     MutableMapping,
+    Awaitable,
 )
 
 from aiomsg import header
@@ -118,18 +118,18 @@ class Søcket:
         send_mode: SendMode = SendMode.ROUNDROBIN,
         delivery_guarantee: DeliveryGuarantee = DeliveryGuarantee.AT_MOST_ONCE,
         receiver_channel: Optional[str] = None,
-        identity: Optional[str] = None,
+        identity: Optional[bytes] = None,
         loop=None,
     ):
         self._tasks = WeakSet()
         self.send_mode = send_mode
         self.delivery_guarantee = delivery_guarantee
         self.receiver_channel = receiver_channel
-        self.identity = identity or str(uuid.uuid4())
+        self.identity = identity or uuid.uuid4().bytes
         self.loop = loop or asyncio.get_event_loop()
 
         self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
-        self._connections: MutableMapping[str, Connection] = ConnectionsDict()
+        self._connections: MutableMapping[bytes, Connection] = ConnectionsDict()
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
@@ -149,6 +149,9 @@ class Søcket:
         else:  # pragma: no cover
             raise Exception("Unknown send mode.")
 
+    def idstr(self) -> str:
+        return self.identity.hex()
+
     async def bind(
         self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
     ):
@@ -156,7 +159,7 @@ class Søcket:
         #  has to be an ``async def`` function, and __init__ has to
         #  be a ``def`` function.
         self.check_socket_type()
-        logger.info(f"Binding socket {self.identity} to {hostname}:{port}")
+        logger.info(f"Binding socket {self.idstr()} to {hostname}:{port}")
         coro = asyncio.start_server(
             self._connection,
             hostname,
@@ -183,10 +186,10 @@ class Søcket:
                 reader, writer = await asyncio.open_connection(
                     hostname, port, loop=self.loop, ssl=ssl_context
                 )
-                logger.info(f"Socket {self.identity} connected.")
+                logger.info(f"Socket {self.idstr()} connected.")
                 await self._connection(reader, writer)
             finally:
-                logger.info(f"Socket {self.identity} disconnected.")
+                logger.info(f"Socket {self.idstr()} disconnected.")
                 if writer:
                     await version_utils.stream_close(writer)
 
@@ -194,7 +197,7 @@ class Søcket:
             """This is a long-running task that is intended to run
             for the life of the Socket object. It will continually
             try to connect."""
-            logger.info(f"Socket {self.identity} connecting to {hostname}:{port}")
+            logger.info(f"Socket {self.idstr()} connecting to {hostname}:{port}")
             while not self.closed:
                 try:
                     await new_connection()
@@ -241,16 +244,16 @@ class Søcket:
         logger.debug("Creating new connection")
 
         # Swap identities
-        logger.debug(f"Sending my identity {self.identity}")
-        await msgproto.send_msg(writer, self.identity.encode())
-        identity = await msgproto.read_msg(reader)  # This could time out.
+        logger.debug(f"Sending my identity {self.idstr()}")
+        await msgproto.send_msg(writer, self.identity)
+        identity = await msgproto.read_msg(reader)
         if not identity:
             return
 
-        logger.debug(f"Received identity {identity}")
+        logger.debug(f"Received identity {identity.hex()}")
         if identity in self._connections:
             logger.error(
-                f"Socket with identity {identity} is already "
+                f"Socket with identity {identity.hex()} is already "
                 f"connected. This connection will not be created."
             )
             return
@@ -258,10 +261,7 @@ class Søcket:
         # Create the connection object. These objects are kept in a
         # collection that is used for message distribution.
         connection = Connection(
-            identity=identity.decode(),
-            reader=reader,
-            writer=writer,
-            recv_event=self.raw_recv,
+            identity=identity, reader=reader, writer=writer, recv_event=self.raw_recv
         )
         if len(self._connections) == 0:
             logger.warning("First connection made")
@@ -271,7 +271,7 @@ class Søcket:
         try:
             await connection.run()
         except asyncio.CancelledError:
-            logger.info(f"Connection {identity} cancelled.")
+            logger.info(f"Connection {identity.hex()} cancelled.")
         finally:
             logger.debug("connection closed")
             if connection.identity in self._connections:
@@ -282,7 +282,7 @@ class Søcket:
                 self.at_least_one_connection.clear()
 
     async def _close(self):
-        logger.info(f"Closing {self.identity}")
+        logger.info(f"Closing {self.idstr()}")
         self.closed = True
 
         # REP dict, close all events waiting to fire
@@ -306,7 +306,7 @@ class Søcket:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
-        logger.info(f"Closed {self.identity}")
+        logger.info(f"Closed {self.idstr()}")
 
     async def close(self, timeout=10):
         try:
@@ -317,7 +317,7 @@ class Søcket:
 
     def raw_recv(self, identity: bytes, message: bytes):
         """Called when *any* active connection receives a message."""
-        logger.debug(f"In raw_recv, identity: {identity} message: {message}")
+        logger.debug(f"In raw_recv, identity: {identity.hex()} message: {message}")
         parts = header.parse_header(message)
         logger.debug(f"{parts}")
         if not parts.has_header:
@@ -385,7 +385,7 @@ class Søcket:
     async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
         identity, message = await self._queue_recv.get()
-        logger.debug(f"Received message from {identity}: {message}")
+        logger.debug(f"Received message from {identity.hex()}: {message}")
 
         return identity, message
 
@@ -401,7 +401,7 @@ class Søcket:
         data = await self.recv_string()
         return json.loads(data)
 
-    async def send(self, data: bytes, identity: Optional[str] = None, retries=None):
+    async def send(self, data: bytes, identity: Optional[bytes] = None, retries=None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
         original_data = data
         if (
@@ -424,7 +424,7 @@ class Søcket:
                     return
 
                 logger.debug(
-                    f"Scheduling the resend to identity:{identity} for data {original_data}"
+                    f"Scheduling the resend to identity:{identity.hex()} for data {original_data}"
                 )
                 self._tasks.add(
                     self.loop.create_task(self.send(original_data, identity))
@@ -448,10 +448,10 @@ class Søcket:
 
         await self._user_send_queue.put((identity, data))
 
-    async def send_string(self, data: str, identity: Optional[str] = None):
+    async def send_string(self, data: str, identity: Optional[bytes] = None):
         await self.send(data.encode(), identity)
 
-    async def send_json(self, obj: JSONCompatible, identity: Optional[str] = None):
+    async def send_json(self, obj: JSONCompatible, identity: Optional[bytes] = None):
         await self.send_string(json.dumps(obj), identity)
 
     def _sender_publish(self, message: bytes):
@@ -461,13 +461,13 @@ class Søcket:
             raise NoConnectionsAvailableError
 
         for identity, c in self._connections.items():
-            logger.debug(f"Sending to connection: {identity}")
+            logger.debug(f"Sending to connection: {identity.hex()}")
             try:
                 c.writer_queue.put_nowait(message)
                 logger.debug("Placed message on connection writer queue.")
             except asyncio.QueueFull:
                 logger.error(
-                    f"Dropped msg to Connection {identity}, its write queue is full."
+                    f"Dropped msg to Connection {identity.hex()}, its write queue is full."
                 )
 
     def _sender_robin(self, message: bytes):
@@ -478,9 +478,13 @@ class Søcket:
 
         """
         logger.debug(f"Sending message via round_robin")
+        queues_full = set()
         while True:
             identity = next(self._connections)
-            logger.debug(f"Got connection: {identity}")
+            logger.debug(f"Got connection: {identity.hex()}")
+            if identity in queues_full:
+                logger.warning(f"All send queues are full. Dropping message.")
+                return
             try:
                 connection = self._connections[identity]
                 connection.writer_queue.put_nowait(message)
@@ -491,13 +495,18 @@ class Søcket:
                     "Cannot send to Connection blah, its write queue is full! "
                     "Trying a different peer..."
                 )
+                queues_full.add(identity)
 
-    def _sender_identity(self, message: bytes, identity: str):
+    def _sender_identity(self, message: bytes, identity: bytes):
         """Send directly to a peer with a distinct identity"""
-        logger.debug(f"Sending message via identity {identity}: {message[:20]}...")
+        logger.debug(
+            f"Sending message via identity {identity.hex()}: {message[:20]}..."
+        )
         c = self._connections.get(identity)
         if not c:
-            logger.error(f"Peer {identity} is not connected. Message will be dropped.")
+            logger.error(
+                f"Peer {identity.hex()} is not connected. Message will be dropped."
+            )
             return
 
         try:
@@ -562,17 +571,18 @@ class HeartBeatFailed(ConnectionError):
 class Connection:
     def __init__(
         self,
-        identity,
+        identity: bytes,
         reader: StreamReader,
         writer: StreamWriter,
         recv_event: Callable[[bytes, bytes], None],
         loop=None,
+        writer_queue_maxsize=0,
     ):
         self.loop = loop or asyncio.get_event_loop()
         self.identity = identity
         self.reader = reader
         self.writer = writer
-        self.writer_queue = asyncio.Queue()
+        self.writer_queue = asyncio.Queue(maxsize=writer_queue_maxsize)
         self.reader_event = recv_event
 
         self.reader_task: Optional[asyncio.Task] = None
@@ -582,10 +592,10 @@ class Connection:
         self.heartbeat_timeout = 15
         self.heartbeat_message = b"aiomsg-heartbeat"
 
-    def warn_dropping_data(self):
+    def warn_dropping_data(self):  # pragma: no cover
         if self.writer_queue.qsize():
             logger.warning(
-                f"Closing connection {self.identity} but there is"
+                f"Closing connection {self.identity.hex()} but there is"
                 f"still data in the writer queue: {self.writer_queue.qsize()}\n"
                 f"These messages will be lost."
             )
@@ -626,7 +636,7 @@ class Connection:
 
             try:
                 logger.debug(
-                    f"Received message on connection {self.identity}: {message}"
+                    f"Received message on connection {self.identity.hex()}: {message}"
                 )
                 self.reader_event(self.identity, message)
             except asyncio.QueueFull:
@@ -638,38 +648,46 @@ class Connection:
             except Exception as e:
                 logger.exception(f"Unhandled error in _recv: {e}")
 
-    async def send_wait(self, message):
+    async def send_wait(self, message: bytes):
         await msgproto.send_msg(self.writer, message)
 
-    async def _send(self):
+    @staticmethod
+    async def _send(
+        identity: bytes,
+        send_wait: Callable[[bytes], Awaitable[None]],
+        writer_queue: asyncio.Queue,
+        heartbeat_interval: float,
+        heartbeat_message: bytes,
+        reader_task: asyncio.Task,
+    ):
         while True:
             try:
                 try:
                     message = await asyncio.wait_for(
-                        self.writer_queue.get(), timeout=self.heartbeat_interval
+                        writer_queue.get(), timeout=heartbeat_interval
                     )
                 except asyncio.TimeoutError:
                     logger.debug("Sending a heartbeat")
-                    message = self.heartbeat_message
+                    message = heartbeat_message
                 except asyncio.CancelledError:
                     break
                 else:
-                    self.writer_queue.task_done()
+                    writer_queue.task_done()
 
                 if not message:
                     logger.info("Connection closed (send)")
-                    self.reader_task.cancel()
+                    reader_task.cancel()
                     break
 
                 logger.debug(
                     f"Got message from connection writer queue. {message[:64]}"
                 )
                 try:
-                    await self.send_wait(message)
+                    await send_wait(message)
                     logger.debug("Sent message")
                 except OSError as e:
                     logger.error(
-                        f"Connection {self.identity} aborted, dropping "
+                        f"Connection {identity.hex()} aborted, dropping "
                         f"message: {message[:50]}...{message[-50:]}\n"
                         f"error: {e}"
                     )
@@ -682,9 +700,18 @@ class Connection:
                 logger.error(f"Unhandled error: {e}")
 
     async def run(self):
-        logger.info(f"Connection {self.identity} running.")
+        logger.info(f"Connection {self.identity.hex()} running.")
         self.reader_task = self.loop.create_task(self._recv())
-        self.writer_task = self.loop.create_task(self._send())
+        self.writer_task = self.loop.create_task(
+            self._send(
+                self.identity,
+                self.send_wait,
+                self.writer_queue,
+                self.heartbeat_interval,
+                self.heartbeat_message,
+                self.reader_task,
+            )
+        )
 
         try:
             await asyncio.wait(
@@ -696,14 +723,4 @@ class Connection:
             group = asyncio.gather(self.reader_task, self.writer_task)
             await group
             self.warn_dropping_data()
-        logger.info(f"Connection {self.identity} no longer active.")
-
-
-def swallow_cancellation(f):
-    async def inner(*args, **kwargs):
-        try:
-            return await f(*args, **kwargs)
-        except asyncio.CancelledError:
-            pass
-
-    return inner
+        logger.info(f"Connection {self.identity.hex()} no longer active.")
