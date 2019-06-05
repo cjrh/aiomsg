@@ -423,9 +423,10 @@ class Søcket:
                     )
                     return
 
-                logger.debug(
-                    f"Scheduling the resend to identity:{identity.hex()} for data {original_data}"
-                )
+                if identity:
+                    logger.debug(
+                        f"Scheduling the resend to identity:{identity.hex()} for data {original_data}"
+                    )
                 self._tasks.add(
                     self.loop.create_task(self.send(original_data, identity))
                 )
