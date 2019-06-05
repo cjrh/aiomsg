@@ -66,7 +66,7 @@ Here's the end that binds to a port (a.k.a, the "server"):
 
     async def main():
         async with Søcket() as sock:
-            await sock.bind('127.0.0.1', 25000):
+            await sock.bind('127.0.0.1', 25000)
             while True:
                 await s.send(time.ctime().encode())
 
@@ -81,8 +81,8 @@ connecting (a.k.a, the "client"):
     from aiomsg import Søcket
 
     async def main():
-        async with Søcket() as sock
-            await sock.connect('127.0.0.1', 25000):
+        async with Søcket() as sock:
+            await sock.connect('127.0.0.1', 25000)
             async for msg in sock.messages():
                 print(msg.decode())
 
@@ -163,8 +163,8 @@ the high-level features:
 
     .. code-block:: python3
 
-        async with Søcket() as sock
-            await sock.bind():
+        async with Søcket() as sock:
+            await sock.bind()
             async for msg in sock.messages():
                 print(f"Received: {msg}")
 
@@ -184,8 +184,8 @@ the high-level features:
 
         from aiomsg import Søcket, SendMode
 
-        async with Søcket(send_mode=SendMode.PUBLISH) as sock
-            await sock.bind():
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock:
+            await sock.bind()
             async for msg in sock.messages():
                 await sock.send(msg)
 
@@ -264,8 +264,8 @@ the high-level features:
 
         from aiomsg import Søcket, SendMode
 
-        async with Søcket(send_mode=SendMode.PUBLISH) as sock
-            await sock.bind():
+        async with Søcket(send_mode=SendMode.PUBLISH) as sock:
+            await sock.bind()
             while True:
                 await sock.send(b'123)
                 await asyncio.sleep(1.0)
@@ -313,7 +313,7 @@ the high-level features:
                 send_mode=SendMode.ROUNDROBIN,
                 delivery_guarantee=DeliveryGuarantee.AT_LEAST_ONCE
         ) as sock:
-            await sock.bind():
+            await sock.bind()
             while True:
                 await sock.send(b'123)
                 await asyncio.sleep(1.0)
@@ -380,7 +380,7 @@ Compare
     # Publisher that binds
     async def main():
         async with Søcket(send_mode=SendMode.PUBLISH) as sock:
-            await sock.bind():
+            await sock.bind()
             while True:
                 await sock.send(b'News!')
                 await asyncio.sleep(1)
@@ -392,7 +392,7 @@ versus
     # Publisher that connects
     async def main():
         async with Søcket(send_mode=SendMode.PUBLISH) as sock:
-            await sock.connect():
+            await sock.connect()
             while True:
                 await sock.send(b'News!')
                 await asyncio.sleep(1)
@@ -440,7 +440,7 @@ These are the downstream workers (don't need a domain name):
     # worker.py - > can be on any number of machines
     async def main():
         async with Søcket() as sock
-            await sock.connect(hostname='jobcreator.com', port=25001):
+            await sock.connect(hostname='jobcreator.com', port=25001)
             while True:
                 work = await sock.recv()
                 <do work>
@@ -670,8 +670,13 @@ be adequate for most common scenarios.
 
 TODO: more scenarios involving identity (like ROUTER-DEALER)
 
+Secure connections with mutual TLS
+----------------------------------
+
+TODO
+
 FAQ
----
+===
 
 Why do you spell ``Søcket`` like that?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -745,7 +750,7 @@ TODO: Discuss the protocol for ``AT_LEAST_ONCE`` mode, which is a bit messy
 at the moment.
 
 Developer setup
----------------
+===============
 
 1. Setup::
 

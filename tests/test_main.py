@@ -270,9 +270,9 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
     sends = defaultdict(list)
     receipts = defaultdict(list)
     port = portpicker.pick_unused_port()
-    with bind_sock(identity="server", port=port, ssl_context=ctx_bind) as server:
-        cm1 = conn_sock(identity="c1", port=port, ssl_context=ctx_connect)
-        cm2 = conn_sock(identity="c2", port=port, ssl_context=ctx_connect)
+    with bind_sock(identity=b"server", port=port, ssl_context=ctx_bind) as server:
+        cm1 = conn_sock(identity=b"c1", port=port, ssl_context=ctx_connect)
+        cm2 = conn_sock(identity=b"c2", port=port, ssl_context=ctx_connect)
         with cm1 as c1, cm2 as c2:
 
             async def c1listen():
@@ -287,7 +287,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
                 with suppress(asyncio.CancelledError):
                     while True:
                         identity, data = await c2.recv_identity()
-                        assert identity == "server"
+                        assert identity == b"server"
                         receipts["c2"].append(data)
                         if sum(len(v) for v in receipts.values()) == size:
                             fut.set_result(1)
@@ -297,10 +297,10 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             async def srvsend():
                 await asyncio.sleep(0.5)  # Wait for clients to connect.
                 for i in range(size):
-                    target_identity = choice(["c1", "c2"])
-                    data = target_identity.encode()
+                    target_identity = choice([b"c1", b"c2"])
+                    data = target_identity
                     await server.send(data=data, identity=target_identity)
-                    sends[target_identity].append(data)
+                    sends[target_identity.decode()].append(data)
                 await fut
 
             t1 = loop.create_task(c1listen())
@@ -404,7 +404,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                             "--sendmode",
                             bind_send_mode.name,
                             "--identity",
-                            str(uuid4()),
+                            uuid4().hex,
                             *ctx_args,
                         ],
                         stderr=sp.STDOUT,
@@ -523,7 +523,7 @@ def test_connection(loop):
         reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
 
         c = aiomsg.Connection(
-            identity=str(uuid4()), reader=reader, writer=writer, recv_event=recv_event
+            identity=uuid4().bytes, reader=reader, writer=writer, recv_event=recv_event
         )
 
         cln_task = loop.create_task(c.run())
