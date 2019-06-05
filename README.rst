@@ -679,14 +679,14 @@ FAQ
 ===
 
 Why do you spell ``Søcket`` like that?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------------
 
 The slashed O is used in homage to `ØMQ <http://zeromq.org/>`_, a truly
 wonderful library that changed my thinking around what socket programming
 could be like.
 
 I want to talk to the aiomsg Søcket with a different programming language
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------------------------------------------------
 
 **WARNING: This section is extremely provisional. I haven't fully
 nailed down the protocol yet.**
