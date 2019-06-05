@@ -670,8 +670,13 @@ be adequate for most common scenarios.
 
 TODO: more scenarios involving identity (like ROUTER-DEALER)
 
+Secure connections with mutual TLS
+----------------------------------
+
+TODO
+
 FAQ
----
+===
 
 Why do you spell ``Søcket`` like that?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -745,7 +750,7 @@ TODO: Discuss the protocol for ``AT_LEAST_ONCE`` mode, which is a bit messy
 at the moment.
 
 Developer setup
----------------
+===============
 
 1. Setup::
 
