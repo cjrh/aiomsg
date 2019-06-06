@@ -673,7 +673,233 @@ TODO: more scenarios involving identity (like ROUTER-DEALER)
 Secure connections with mutual TLS
 ----------------------------------
 
-TODO
+Secure connectivity is extremely important, *even in an internal
+microservices infrastructure*. From a design perspective, the single
+biggest positive impact that can be made on security is to make it **easy**
+for users to do the "right thing".
+
+For this reason, ``aiomsg`` does nothing new at all. It uses the existing
+support for secure connectivity in the Python standard library, and
+uses the same APIs exactly as-is.
+
+All you have to do is create an `SSLContext <https://docs.python.org/3/library/ssl.html#ssl.SSLContext>`_
+object, exactly as you normally would for conventional Python
+sockets, and pass that in.
+
+`Mutual TLS authentication (mTLS) <https://en.wikipedia.org/wiki/Mutual_authentication>`_
+is where the client verifies the server **and** the server verifies
+the client. In ``aiomsg``, names like "client" and "server" are less
+useful, so let's rather say that the *connect* socket verifies the
+target *bind* socket, and the *bind* socket also verifies the incoming
+connecting socket.
+
+It sounds complicated, but at a high level you just need to supply
+an ``SSLContext`` instance to the bind socket, and a different ``SSLContext``
+instance to the connect socket (usually on a different computer). The details
+are all stored in the ``SSLContext`` objects.
+
+Let's first look at how that looks for a typical bind socket and connect
+socket:
+
+.. code-block:: python3
+
+    # bind end
+    import ssl
+    import asyncio, time
+    from aiomsg import Søcket
+
+    async def main():
+        ctx = ssl.SSLContext(...)    # <--------- NEW!
+        async with Søcket() as sock:
+            await sock.bind('127.0.0.1', 25000, ssl_context=ctx)
+            while True:
+                await s.send(time.ctime().encode())
+
+    asyncio.run(main())
+
+.. code-block:: python3
+
+    # connect end
+    import ssl
+    import asyncio
+    from aiomsg import Søcket
+
+    async def main():
+        ctx = ssl.SSLContext(...)    # <--------- NEW!
+        async with Søcket() as sock:
+            await sock.connect('127.0.0.1', 25000, ssl_context=ctx)
+            async for msg in sock.messages():
+                print(msg.decode())
+
+    asyncio.run(main())
+
+If you compare these two code snippets to what was shown in the *Demo*
+section, you'll see it's almost exactly the same, except that we're
+passing a new `ctx` parameter into the respective `bind()` and `connect()`
+calls, which is an instance of `SSLContext`.
+
+So if you already know how to work with Python's built-in `SSLContext`
+object, you can already create secure connections with `aiomsg` and
+there's nothing more you need to learn.
+
+Crash course on setting up an ``SSLContext``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You might not know how to set up the ``SSLContext`` object.
+Here, I'll give a crash course, but please remember that I am
+not a security expert so make sure to ask an actual security expert
+to review your work if you're working on a production system.
+
+The best way to create an ``SSLContext`` object is **not** with its
+constructor, but rather a helper function called ``create_default_context()``,
+which sets a lot of sensible defaults that you would otherwise have to
+do manually. So that's how you get the context instance.
+
+You do have to specify whether the purpose of the context object is to
+verify a client or a server. Let's have a look at that:
+
+.. code-block:: python3
+
+    # bind socket, or "server"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+
+So here, above, we're creating a context object for a bind socket. The
+purpose of the context is going to be to *verify incoming client connections*,
+that's why the ``CLIENT_AUTH`` purpose was given.  As you might imagine,
+on the other end, i.e., the connect socket (or "client"), the purpose
+is going to be to verify the server:
+
+.. code-block:: python3
+
+    # connect socket, or "client"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+
+Once you've created the context, the remaining parameters have the same
+meaning for both client and server.
+
+The way TLS works (the artist formerly known as SSL) is that each end
+of a connection has two pieces of information:
+
+1. A **certificate** (may be shared publicly)
+2. A **key** (MUST NOT BE SHARED! SECRET!)
+
+When the two sockets establish a connection, they trade certificates, but
+do not trade keys. Anyway, let's look at what you need to actually set
+in the code. We'll start with the connect socket (client).
+
+.. code-block:: python3
+
+    # connect socket, or "client"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    ctx.load_verify_locations(<something that can verify the server cert>)
+
+The above will let the client verify that the server it is connecting
+to is the correct one. When the socket connects, the server socket
+will send back a *certificate* and the client checks that against one of
+those mysterious "verify locations".
+
+For mutual TLS, the server also wants to check the client. What does it
+check? Well, the client must also provide a certificate back to the server.
+So that requires an additional line in the code block above:
+
+.. code-block:: python3
+
+    # connect socket, or "client"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    ctx.load_verify_locations(<something that can verify the server cert>)
+
+    # Client needs a pair of "cert" and "key"
+    ctx.load_cert_chain(certfile="client.cert", keyfile="client.key")
+
+So that completes everything we need to do for the SSL context on the
+client side.  On the server side, everything is almost exactly the same:
+
+.. code-block:: python3
+
+    # bind socket, or "server"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(<something that can verify the client cert>)
+
+    # Server needs a pair of "cert" and "key"
+    ctx.load_cert_chain(certfile="server.cert", keyfile="server.key")
+
+That describes everything you need to do to set up *mutual TLS* using
+``SSLContext`` instances.
+
+There are a few loose ends to tie up though. Where do you get the
+``certfile`` and ``keyfile`` from? And what is this mysterious
+"verify location"? The first question is easier. The cert and key can be
+generated using the OpenSSL command-line application:
+
+.. code-block:: bash
+
+    $ openssl req -newkey rsa:2048 -nodes -keyout server.key \
+        -x509 -days 365 -out server.cert \
+        -subj '/C=GB/ST=Blah/L=Blah/O=Blah/OU=Blah/CN=example.com'
+
+Running the above command will create two new files, ``server.cert`` and
+``server.key``; these are ones you specify in earlier commands. Generating
+these files for the client is exactly the same, but you use different
+names.
+
+You could also use `Let's Encrypt <https://letsencrypt.org/>`_
+to generate the cert and key, in which case you don't have to run the
+above commands. *IF* you use Let's Encrypt, you've also solved the
+other problem of supplying a "verify location", and in fact you won't need
+to call ``load_verify_locations()`` in the client code at all. This is
+because there are a bunch of *root certificate authorities* that are
+provided with most operating systems, and *Let's Encrypt* is one of those.
+
+However, for the sake of argument, let's say you want to make your
+own certificates and you don't want to rely on system-provided root
+certificates at all; how to do the verification? Well it turns out that
+a very simple solution is to just use the target certificate itself to be
+the "verify location". For example, here is the client context again:
+
+.. code-block:: python3
+
+    # connect socket, or "client"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    ctx.load_verify_locations("server.cert")   # <--- Same one as the server
+
+    # Client needs a pair of "cert" and "key"
+    ctx.load_cert_chain(certfile="client.cert", keyfile="client.key")
+
+and then in the server's context, you could also use the client's cert
+as the "verify location":
+
+.. code-block:: python3
+
+    # bind socket, or "server"
+    ctx: SSLContext = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations("client.cert)   # <--- Same as on client
+
+    # Server needs a pair of "cert" and "key"
+    ctx.load_cert_chain(certfile="server.cert", keyfile="server.key")
+
+Obviously, the client code and the server code are running on different
+computers and you need to make sure that the right files are on the right
+computers in the right places.
+
+There are a lot of ways to make this more sophisticated, but it's
+probably a good idea to get the simple case working, as described above,
+before looking at the more complicated cases. A cool option is to make
+your own *root certificate authority*, which can be a standard
+"verify location" in all your microservices, and then when you make certs
+and keys for each microservice, you just have to "sign" them with the
+root key. This process is described in
+`Be your own certificate authority <https://opensource.com/article/19/4/certificate-authority>`_
+by Moshe Zadka
+
+Hope that helps!
 
 FAQ
 ===
