@@ -35,7 +35,6 @@ jobs:
         PYTHONPATH: .
       run: |
         pip install pytest
-        pip install .
         pytest -v --cov aiomsg tests
     - name: Extract branch name
       shell: bash
