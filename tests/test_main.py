@@ -123,7 +123,7 @@ def test_hello(
             loop.create_task(client_recv())
 
             run(sock_sender(message_type, client, value))
-            run(fut, timeout=2)
+            run(fut, timeout=10)
 
     assert received
     assert len(received) == 1
@@ -253,7 +253,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         server_task.cancel()
         await server_task
 
-    loop.run_until_complete(asyncio.wait_for(inner(), 2))
+    loop.run_until_complete(asyncio.wait_for(inner(), 5))
     assert received
     assert len(received) == 3
     assert received[0] == "Blah"
@@ -295,7 +295,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             fut = asyncio.Future()
 
             async def srvsend():
-                await asyncio.sleep(0.5)  # Wait for clients to connect.
+                await asyncio.sleep(1.0)  # Wait for clients to connect.
                 for i in range(size):
                     target_identity = choice([b"c1", b"c2"])
                     data = target_identity
