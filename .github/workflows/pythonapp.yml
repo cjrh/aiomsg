@@ -36,8 +36,7 @@ jobs:
       run: |
         pip install pytest
         pip install .
-        pytest -v --cov aiomsg tests/
-
+        pytest -v --cov aiomsg tests
     - name: Extract branch name
       shell: bash
       run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
