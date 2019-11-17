@@ -1,9 +1,8 @@
 import asyncio
 from collections import Counter
 import uuid
-from unittest.mock import MagicMock
 import pytest
-from aiomsg import Søcket, SendMode, Connection, NoConnectionsAvailableError
+from aiomsg import Søcket, Connection, NoConnectionsAvailableError
 
 
 @pytest.mark.parametrize(

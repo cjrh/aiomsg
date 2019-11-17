@@ -23,7 +23,4 @@ def loop():
     try:
         yield ev
     finally:
-        try:
-            ev.close()
-        except:
-            logging.exception("Errors closing loop:")
+        ev.close()
