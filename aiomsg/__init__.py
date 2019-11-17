@@ -168,7 +168,11 @@ class Søcket:
         return self
 
     async def connect(
-        self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
+        self,
+        hostname: str = "127.0.0.1",
+        port: int = 25000,
+        ssl_context=None,
+        connect_timeout: float = 1.0,
     ):
         self.check_socket_type()
 
@@ -178,11 +182,17 @@ class Søcket:
             writer = None
             try:
                 logger.debug("Attempting to open connection")
-                reader, writer = await asyncio.open_connection(
-                    hostname, port, loop=self.loop, ssl=ssl_context
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(
+                        hostname, port, loop=self.loop, ssl=ssl_context
+                    ),
+                    timeout=connect_timeout,
                 )
                 logger.info(f"Socket {self.idstr()} connected.")
                 await self._connection(reader, writer)
+            except asyncio.TimeoutError:
+                # Make timeouts look like socket connection errors
+                raise OSError
             finally:
                 logger.info(f"Socket {self.idstr()} disconnected.")
                 if writer:
@@ -267,6 +277,9 @@ class Søcket:
             await connection.run()
         except asyncio.CancelledError:
             logger.info(f"Connection {identity.hex()} cancelled.")
+        except:
+            logger.exception(f"Unhandled exception inside _connection")
+            raise
         finally:
             logger.debug("connection closed")
             if connection.identity in self._connections:
