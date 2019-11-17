@@ -128,14 +128,14 @@ class Søcket:
         self.identity = identity or uuid.uuid4().bytes
         self.loop = loop or asyncio.get_event_loop()
 
-        self._queue_recv = asyncio.Queue(maxsize=65536, loop=self.loop)
+        self._queue_recv = asyncio.Queue(maxsize=65536)
         self._connections: MutableMapping[bytes, Connection] = ConnectionsDict()
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
         self.socket_type: Optional[ConnectionEnd] = None
         self.closed = False
-        self.at_least_one_connection = asyncio.Event(loop=self.loop)
+        self.at_least_one_connection = asyncio.Event()
 
         self.waiting_for_acks: Dict[uuid.UUID, asyncio.Handle] = {}
 
@@ -161,12 +161,7 @@ class Søcket:
         self.check_socket_type()
         logger.info(f"Binding socket {self.idstr()} to {hostname}:{port}")
         coro = asyncio.start_server(
-            self._connection,
-            hostname,
-            port,
-            loop=self.loop,
-            ssl=ssl_context,
-            reuse_address=True,
+            self._connection, hostname, port, ssl=ssl_context, reuse_address=True
         )
         self.server = await coro
         logger.info("Server started.")
