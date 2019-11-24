@@ -1,9 +1,8 @@
 import asyncio
 from collections import Counter
 import uuid
-from unittest.mock import MagicMock
 import pytest
-from aiomsg import Søcket, SendMode, Connection, NoConnectionsAvailableError
+from aiomsg import Søcket, Connection, NoConnectionsAvailableError
 
 
 @pytest.mark.parametrize(
@@ -43,7 +42,7 @@ def test_a(
             pass
 
     reader_task = loop.create_task(reader())
-    writer_queue = asyncio.Queue(loop=loop)
+    writer_queue = asyncio.Queue()
     if isinstance(msg, list):
         for m in msg:
             writer_queue.put_nowait(m)

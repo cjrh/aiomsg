@@ -123,7 +123,7 @@ def test_hello(
             loop.create_task(client_recv())
 
             run(sock_sender(message_type, client, value))
-            run(fut, timeout=2)
+            run(fut, timeout=10)
 
     assert received
     assert len(received) == 1
@@ -171,7 +171,7 @@ def test_hello_before(
             loop.create_task(server_recv())
 
             run(sock_sender(message_type, client, value))
-            run(fut, timeout=2)
+            run(fut, timeout=5.0)
 
     assert received
     assert len(received) == 1
@@ -253,14 +253,14 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         server_task.cancel()
         await server_task
 
-    loop.run_until_complete(asyncio.wait_for(inner(), 2))
+    loop.run_until_complete(asyncio.wait_for(inner(), 5))
     assert received
     assert len(received) == 3
     assert received[0] == "Blah"
     print(received)
 
 
-@pytest.mark.parametrize("ssl_enabled", [False, True])
+@pytest.mark.parametrize("ssl_enabled", [True, False])
 def test_identity(loop, ssl_enabled, ssl_contexts):
     ctx_bind = ctx_connect = None
     if ssl_enabled:
@@ -295,7 +295,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             fut = asyncio.Future()
 
             async def srvsend():
-                await asyncio.sleep(0.5)  # Wait for clients to connect.
+                await asyncio.sleep(1.0)  # Wait for clients to connect.
                 for i in range(size):
                     target_identity = choice([b"c1", b"c2"])
                     data = target_identity
@@ -306,7 +306,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
             t1 = loop.create_task(c1listen())
             t2 = loop.create_task(c2listen())
 
-            loop.run_until_complete(asyncio.wait_for(srvsend(), 30.0))
+            loop.run_until_complete(asyncio.wait_for(srvsend(), 5.0))
 
             t1.cancel()
             t2.cancel()
@@ -407,10 +407,13 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                             uuid4().hex,
                             *ctx_args,
                         ],
+                        stdout=sp.PIPE,
                         stderr=sp.STDOUT,
                     )
                     logger.info("SERVER IS UP")
                     await asyncio.sleep(uniform(1, 5))
+                except:
+                    logger.exception("Error running the echo server")
                 finally:
                     # try-finally is needed because a cancellation above in
                     # `await asyncio.create_subprocess_exec()` would exit
