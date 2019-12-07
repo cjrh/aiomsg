@@ -123,7 +123,7 @@ class Søcket:
         reconnection_delay: Callable[[], float] = lambda: 0.1,
     ):
         """
-        :param reconnection_delay_algorithm: In large microservices
+        :param reconnection_delay: In large microservices
             architectures, an outage in one service will result in all the
             dependant services trying to connect over and over again (and
             sending their buffered data immediately). This parameter lets you
