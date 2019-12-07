@@ -1,11 +1,8 @@
+.. image:: https://github.com/cjrh/aiomsg/workflows/Python%20application/badge.svg
+    :target: https://github.com/cjrh/aiomsg/actions
+
 .. image:: https://img.shields.io/badge/stdlib--only-yes-green.svg
     :target: https://img.shields.io/badge/stdlib--only-yes-green.svg
-
-.. image:: https://travis-ci.org/cjrh/aiomsg.svg?branch=master
-    :target: https://travis-ci.org/cjrh/aiomsg
-
-.. image:: https://ci.appveyor.com/api/projects/status/66bgl8r2aixm5f67/branch/master?svg=true
-    :target: https://ci.appveyor.com/project/cjrh/aiomsg
 
 .. image:: https://coveralls.io/repos/github/cjrh/aiomsg/badge.svg?branch=master
     :target: https://coveralls.io/github/cjrh/aiomsg?branch=master
