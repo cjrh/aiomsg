@@ -53,6 +53,7 @@ Here's the end that binds to a port (a.k.a, the "server"):
             await sock.bind('127.0.0.1', 25000)
             while True:
                 await s.send(time.ctime().encode())
+                await asyncio.sleep(1)
 
     asyncio.run(main())
 
