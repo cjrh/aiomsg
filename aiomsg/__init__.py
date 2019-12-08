@@ -275,8 +275,29 @@ class Søcket:
 
         (This is a complete program btw!)
         """
+        async for source, msg in self.identity_messages():
+            yield msg
+
+    async def identity_messages(self) -> AsyncGenerator[Tuple[bytes, bytes], None]:
+        """This is like the ``.messages`` asynchronous generator, but it
+        returns a tuple of (identity, message) rather than only the message.
+
+        Example:
+
+        .. code-block: python3
+
+            import asyncio
+            from aiomsg import SmartSock
+
+            async def main(addr: str):
+                async for src, msg in SmartSock().bind(addr).messages():
+                    print(f'Got a message from {src.hex()}: {msg}')
+
+            asyncio.run(main('localhost:8080'))
+
+        """
         while True:
-            yield await self.recv()
+            yield await self.recv_identity()
 
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
         """Each new connection will create a task with this coroutine."""
@@ -436,12 +457,30 @@ class Søcket:
         _, message = await self.recv_identity()
         return message
 
-    async def recv_string(self) -> str:
-        return (await self.recv()).decode()
+    async def recv_string(self, **kwargs) -> str:
+        """Automatically decode messages into strings.
 
-    async def recv_json(self) -> JSONCompatible:
-        data = await self.recv_string()
-        return json.loads(data)
+        The ``kwargs`` are passed to the ``.decode()`` method of the
+        received bytes object; for example ``encoding`` and ``errors``.
+        If you wanted to override the error handler for decoding unicode,
+        you might do something like the following:
+
+        .. code-block:: python3
+
+            msg_str = await sock.recv_string(errors='backslashreplace')
+
+        Which will substitute unicode-invalid bytes with hexadecimal values
+        formatted like ``\\xNN``.
+        """
+        return (await self.recv()).decode(**kwargs)
+
+    async def recv_json(self, **kwargs) -> JSONCompatible:
+        """Automatically deserialize messages in JSON format
+
+        The ``kwargs`` are passed to the ``json.loads()`` method.
+        """
+        data = await self.recv()
+        return json.loads(data, **kwargs)
 
     async def send(self, data: bytes, identity: Optional[bytes] = None, retries=None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
@@ -491,11 +530,45 @@ class Søcket:
 
         await self._user_send_queue.put((identity, data))
 
-    async def send_string(self, data: str, identity: Optional[bytes] = None):
-        await self.send(data.encode(), identity)
+    async def send_string(self, data: str, identity: Optional[bytes] = None, **kwargs):
+        """Automatically convert the string to bytes when sending.
 
-    async def send_json(self, obj: JSONCompatible, identity: Optional[bytes] = None):
-        await self.send_string(json.dumps(obj), identity)
+        The ``kwargs`` are passed to the internal ``data.encode()`` method. """
+        await self.send(data.encode(**kwargs), identity)
+
+    async def send_json(
+        self, obj: JSONCompatible, identity: Optional[bytes] = None, **kwargs
+    ):
+        """Automatically serialise the given ``obj`` to a JSON representation
+        when sending.
+
+        The ``kwargs`` are passed to the ``json.dumps()`` method. In particular,
+        you might find the ``default`` parameter of ``dumps`` useful, since
+        this can be used to automatically convert an otherwise
+        JSON-incompatible attribute into something that can be represented.
+        For example:
+
+        .. code-block:: python3
+
+            class Blah:
+                def __init__(self, x, y):
+                    self.x = x
+                    self.y = y
+
+                def __str__(self):
+                    return f'{x},{y}'
+
+            d = dict(text='hi', obj=Blah(1, 2))
+
+            await sock.send_json(d, default=str)
+            # The bytes that will be sent: {"text": "hi", "obj": "1,2"}
+
+        It requires a bit more work to make a class properly serialize and
+        deserialize to JSON, however. You will need to carefully study
+        how to use the ``object_hook`` parameter in the ``json.loads()``
+        method.
+        """
+        await self.send_string(json.dumps(obj, **kwargs), identity)
 
     def _sender_publish(self, message: bytes):
         logger.debug(f"Sending message via publish")
