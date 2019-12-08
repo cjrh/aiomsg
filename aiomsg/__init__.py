@@ -120,7 +120,25 @@ class Søcket:
         receiver_channel: Optional[str] = None,
         identity: Optional[bytes] = None,
         loop=None,
+        reconnection_delay: Callable[[], float] = lambda: 0.1,
     ):
+        """
+        :param reconnection_delay: In large microservices
+            architectures, an outage in one service will result in all the
+            dependant services trying to connect over and over again (and
+            sending their buffered data immediately). This parameter lets you
+            provide a means of staggering the reconnections to avoid
+            overwhelming the service that comes back into action after an
+            outage. For example, you could stagger all your dependent
+            microservices by providing:
+
+                lambda: random.random(10)
+
+            which means that the reconnection delay for a specific socket
+            will be a random number of seconds between 0 and 10. This will
+            spread out all the reconnecting services over a 10 second
+            window.
+        """
         self._tasks = WeakSet()
         self.send_mode = send_mode
         self.delivery_guarantee = delivery_guarantee
@@ -138,6 +156,7 @@ class Søcket:
         self.at_least_one_connection = asyncio.Event()
 
         self.waiting_for_acks: Dict[uuid.UUID, asyncio.Handle] = {}
+        self.reconnection_delay = reconnection_delay
 
         logger.debug("Starting the sender task.")
         # Note this task is started before any connections have been made.
@@ -213,7 +232,7 @@ class Søcket:
                         break
                     else:
                         logger.warning("Connection error, reconnecting...")
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(self.reconnection_delay())
                         continue
                 except asyncio.CancelledError:
                     break
