@@ -25,11 +25,12 @@
 .. image:: https://img.shields.io/badge/code%20style-black-000000.svg
     :target: https://github.com/ambv/black
 
-
 aiomsg
 ======
 
 Pure-Python smart sockets (like ZMQ) for simple microservices architecture
+
+.. image:: https://upload.wikimedia.org/wikipedia/commons/5/5e/NetworkDecentral.svg
 
 Table of Contents
 -----------------
