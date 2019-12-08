@@ -296,7 +296,7 @@ class Søcket:
             await connection.run()
         except asyncio.CancelledError:
             logger.info(f"Connection {identity.hex()} cancelled.")
-        except:
+        except Exception:
             logger.exception(f"Unhandled exception inside _connection")
             raise
         finally:

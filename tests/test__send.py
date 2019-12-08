@@ -2,6 +2,8 @@ import asyncio
 from collections import Counter
 import uuid
 import pytest
+
+# noinspection PyProtectedMember
 from aiomsg import Søcket, Connection, NoConnectionsAvailableError
 
 
@@ -103,6 +105,7 @@ def test_sender_publish_no_connections(loop, connection, queue_full):
         else:
             maxsize = 0
 
+        # noinspection PyTypeChecker
         c = Connection(b"123", None, None, None, writer_queue_maxsize=maxsize)
         # Put one in there to make it full
         c.writer_queue.put_nowait(b"blah")
@@ -125,6 +128,7 @@ def test_sender_robin_no_connections(loop, connection, queue_full):
         else:
             maxsize = 0
 
+        # noinspection PyTypeChecker
         c = Connection(b"123", None, None, None, writer_queue_maxsize=maxsize)
         # Put one in there to make it full
         c.writer_queue.put_nowait(b"blah")
@@ -147,6 +151,7 @@ def test_sender_identity_no_connections(loop, connection, queue_full):
         else:
             maxsize = 0
 
+        # noinspection PyTypeChecker
         c = Connection(b"123", None, None, None, writer_queue_maxsize=maxsize)
         # Put one in there to make it full
         c.writer_queue.put_nowait(b"blah")

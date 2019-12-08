@@ -48,7 +48,7 @@ def ssl_contexts():
         f"-x509 -days 365 -out {cert_server} "
         "-subj '/C=GB/ST=London/L=London/O=Global Security/OU=IT Department/CN=example.com'"
     )
-    out = sp.run(shlex.split(cmd), stdout=sp.PIPE)
+    sp.run(shlex.split(cmd), stdout=sp.PIPE)
     cmd = (
         f"openssl req -newkey rsa:2048 -nodes -keyout {key_client} "
         f"-x509 -days 365 -out {cert_client} "
@@ -412,7 +412,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                     )
                     logger.info("SERVER IS UP")
                     await asyncio.sleep(uniform(1, 5))
-                except:
+                except Exception:
                     logger.exception("Error running the echo server")
                 finally:
                     # try-finally is needed because a cancellation above in
