@@ -55,6 +55,7 @@ from typing import (
     Callable,
     MutableMapping,
     Awaitable,
+    Sequence,
 )
 
 from aiomsg import header
@@ -172,17 +173,31 @@ class Søcket:
         return self.identity.hex()
 
     async def bind(
-        self, hostname: str = "127.0.0.1", port: int = 25000, ssl_context=None
+        self,
+        hostname: Optional[Union[str, Sequence[str]]] = "127.0.0.1",
+        port: int = 25000,
+        ssl_context=None,
+        **kwargs,
     ):
-        # TODO: I would have made this part of __init__, but alas this
-        #  has to be an ``async def`` function, and __init__ has to
-        #  be a ``def`` function.
+        """
+        :param hostname: Hostname to bind. This can be a few different types,
+            see the documentation for `asyncio.start_server()`.
+        :param port: See documentation for `asyncio.start_server()`.
+        :param ssl_context: See documentation for `asyncio.start_server()`.
+        :param kwargs: All extra kwargs are passed through to
+            `asyncio.start_server`. See the asyncio documentation for
+            details.
+        """
         self.check_socket_type()
         logger.info(f"Binding socket {self.idstr()} to {hostname}:{port}")
-        coro = asyncio.start_server(
-            self._connection, hostname, port, ssl=ssl_context, reuse_address=True
+        self.server = await asyncio.start_server(
+            self._connection,
+            hostname,
+            port,
+            ssl=ssl_context,
+            reuse_address=True,
+            **kwargs,
         )
-        self.server = await coro
         logger.info("Server started.")
         return self
 
