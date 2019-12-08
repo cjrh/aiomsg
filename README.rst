@@ -28,7 +28,7 @@
 aiomsg
 ======
 
-Pure-Python smart sockets (like ZMQ) for simple microservices architecture
+Pure-Python smart sockets (like ZMQ) for simpler networking
 
 .. figure:: https://upload.wikimedia.org/wikipedia/commons/5/5e/NetworkDecentral.svg
     :target: https://commons.wikimedia.org/wiki/File:NetworkDecentral.svg
