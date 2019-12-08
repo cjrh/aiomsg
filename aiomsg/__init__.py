@@ -585,7 +585,7 @@ class Søcket:
             self.socket_type is None
         ), f"Socket type has already been set: {self.socket_type}"
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Søcket":
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
