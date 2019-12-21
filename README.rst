@@ -30,13 +30,6 @@ aiomsg
 
 Pure-Python smart sockets (like ZMQ) for simpler networking
 
-.. figure:: https://upload.wikimedia.org/wikipedia/commons/5/5e/NetworkDecentral.svg
-    :target: https://commons.wikimedia.org/wiki/File:NetworkDecentral.svg
-    :alt: Diagram of computers linked up in a network
-
-    :sub:`Attribution: And1mu [CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0)]`
-
-
 Table of Contents
 -----------------
 
@@ -46,9 +39,102 @@ Table of Contents
 Demo
 ====
 
-.. figure:: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg
-    :target: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg
+Put on your *Software Architect* hat, and imagine a microservices layout
+shown in this block diagram:
+
+.. figure:: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg?sanitize=true
     :alt: Layout of an example microservices architecture
+
+- One of more features are exposed to the world via the *load balancer*, **N**.
+  For example, this could be *nginx*.
+- Imagine the load balancer proxies HTTP requests through to your backend
+  webservers, **H**. Your webserver may well do some processing itself, but
+  imagine further that it needs information from other microservices to
+  service some requests.
+  - Both instances of **H** are identical, there are two of them for
+  redundancy.
+- One of these microservices is **A**. It's not important what it does, just
+  that it does "something".
+- It turns out that sometimes **A** needs information supplied by another
+  microservice, **B**. Both **A** and **B** need to do work so it's important
+  that they can both be scaled horizontally (ignore that "horizontal scaling"
+  would actually be in a vertical direction in the diagram!).
+
+The goal of **aiomsg** is to make it simple to construct these kinds of
+arrangements of microservices.
+
+We'll move through each of the services and look at their code:
+
+
+.. code-block:: python3
+
+    # microservice: H
+    import asyncio
+    import json
+    from aiomsg import Søcket
+    from aiohttp import web
+    from dataclasses import dataclass
+
+    @dataclass
+    class Payload:
+        msg_id: int
+        req: Dict
+        resp: Dict
+
+    REQ_COUNTER = 0
+    BACKEND_QUEUE = asyncio.Queue()  # TODO: must be inside async context
+    pending_backend_requests: {}
+
+    async def backend_receiver(sock: Søcket):
+        async for msg in sock.messages():
+            raw_data = json.loads(msg)
+            data = Payload(**raw_data)
+            f = pending_backend_requests.pop(data.msg_id)
+            f.set_result(data.body)
+
+    async def backend(app):
+        async with Søcket() as sock:
+            await sock.bind('127.0.0.1', 25000)
+            asyncio.create_task(backend_receiver(sock))
+            while True:
+                await sock.send(time.ctime().encode())
+                await asyncio.sleep(1)
+
+    async def run_backend_job(sock: Søcket, data: Payload) -> Payload:
+        f = asyncio.Future()
+        REQ_COUNTER += 1
+        pending_backend_requests[REQ_COUNTER] = f
+        backend_response = await f
+        data = dict(result=backend_response)
+
+    async def handle(request):
+        nonlocal REQ_COUNTER
+        # TODO: get post data from request to send to backend
+
+        f = asyncio.Future()
+        REQ_COUNTER += 1
+        pending_backend_requests[REQ_COUNTER] = f
+        backend_response = await f
+        data = dict(result=backend_response)
+        return web.json_response(data)
+
+    app = web.Application()
+    app.on_startup.append(backend)
+    app.add_routes([
+        web.post('/process/{name}', handle),
+    ])
+
+    if __name__ == '__main__':
+        web.run_app(app)
+
+
+TODO: microservice A
+TODO: microservice P
+TODO: microservice B
+TODO: microservice M
+
+Simple Demo
+===========
 
 Let's make two microservices; one will send the current time to the other.
 Here's the end that binds to a port (a.k.a, the "server"):
