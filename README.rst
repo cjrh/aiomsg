@@ -47,6 +47,7 @@ Demo
 ====
 
 .. figure:: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg
+    :target: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg
     :alt: Layout of an example microservices architecture
 
 Let's make two microservices; one will send the current time to the other.
