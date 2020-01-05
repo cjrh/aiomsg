@@ -229,8 +229,7 @@ class Søcket:
                 raise OSError
             finally:
                 logger.info(f"Socket {self.idstr()} disconnected.")
-                if writer:
-                    await version_utils.stream_close(writer)
+                # NOTE: the writer is closed inside _connection.
 
         async def connect_with_retry():
             """This is a long-running task that is intended to run
@@ -339,6 +338,8 @@ class Søcket:
             logger.debug("connection closed")
             if connection.identity in self._connections:
                 del self._connections[connection.identity]
+
+            await version_utils.stream_close(writer)
 
             if not self._connections:
                 logger.warning("No connections!")
