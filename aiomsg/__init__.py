@@ -336,10 +336,11 @@ class Søcket:
             logger.exception(f"Unhandled exception inside _connection")
             raise
         finally:
-            await version_utils.stream_close(writer)
             logger.debug("connection closed")
             if connection.identity in self._connections:
                 del self._connections[connection.identity]
+
+            await version_utils.stream_close(writer)
 
             if not self._connections:
                 logger.warning("No connections!")
