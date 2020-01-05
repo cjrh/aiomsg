@@ -229,8 +229,7 @@ class Søcket:
                 raise OSError
             finally:
                 logger.info(f"Socket {self.idstr()} disconnected.")
-                if writer:
-                    await version_utils.stream_close(writer)
+                # NOTE: the writer is closed inside _connection.
 
         async def connect_with_retry():
             """This is a long-running task that is intended to run
