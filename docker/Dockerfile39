@@ -1,10 +1,10 @@
-FROM python:3.7.2-alpine3.9
+FROM python:3.9-rc-alpine3.10
 
 RUN apk add --update openssl && \
     rm -rf /var/cache/apk/*
 
 COPY . /aiomsg
 
-RUN pip install -e aiomsg[all]
+RUN pip install -e aiomsg[test]
 WORKDIR /aiomsg
 CMD ["python", "-m", "pytest", "--cov", "aiomsg", "--cov-report", "term-missing"]
