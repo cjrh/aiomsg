@@ -185,7 +185,7 @@ the high-level features:
     sender). By changing ``PUBLISH`` to ``ROUNDROBIN``, the message
     distribution pattern changes so that each "sent" message goes to
     only one connected peer. The next "sent" message will go to a
-    different connected, and so on.
+    different connected peer, and so on.
 
     For *identity-based* message sending, that's available any time,
     regardless of what you choose for the ``send_mode`` parameter; for
@@ -201,9 +201,13 @@ the high-level features:
                 await sock1.bind(port=25000)
                 await sock2.bind(port=25001)
                 while True:
-                    peer_id, message = await sock1.recv_identity()
+                    peer_id, msg = await sock1.recv_identity()
+                    # Imagine that the sender constructs each message with
+                    # an id like <[prefix][id][\x00][data]>
                     msg_id, _, data = msg.partition(b"\x00")
+                    # This goes to all peers (publish mode)
                     await sock2.send(data)
+                    # This only goes to the specified peer (identity)
                     await sock1.send(msg_id + b"\x00ok", identity=peer_id)
 
         asyncio.run(main())
@@ -329,6 +333,16 @@ the high-level features:
     exchange for this, you get a lower overall latency because sending
     new messages is not waiting on previous messages getting acknowledged.
 
+    Finally: if the target peer goes down, *and* the sending peer goes
+    down, all memory of pending retries is lost. This is because *aiomsg*
+    keeps the retry log in memory. If your use-case requires greater
+    resilience than what the delivery guarantee provides, then you should
+    not use ``AT_LEAST_ONCE``, but instead build your own retry system where you
+    track pending replies an actual database that can persist state
+    across restarts. Currently, *aiomsg* does not do this. (It's an
+    interesting feature and I may work on it in the future, but it isn't
+    there right now.)
+
 #.  Pure python, doesn't require a compiler
 
 #.  Depends only on the Python standard library
@@ -393,8 +407,8 @@ choose the *bind* peer based one which service is least likely to
 require dynamic scaling.  This means that the mental conception of
 socket peers as either a *server* or *client* is not that useful.
 
-Distribute messages to a dynamically-scaled service (multiple instances)
-------------------------------------------------------------------------
+❕ Distribute messages to a dynamically-scaled service (multiple instances)
+----------------------------------------------------------------------------
 
 In this recipe, one service needs to send messages to another service
 that is horizontally scaled.
@@ -447,8 +461,8 @@ in a circular pattern.
 This core recipe provides a foundation on which many of the other
 recipes are built.
 
-Distribute messages from a 2-instance service to a dynamically-scaled one
--------------------------------------------------------------------------
+❕❕ Distribute messages from a 2-instance service to a dynamically-scaled one
+-------------------------------------------------------------------------------
 
 In this scenario, there are actually two instances of the job-creating
 service, not one. This would typically be done for reliability, and
@@ -493,8 +507,8 @@ it comes in from either job creation service. And as before, the number
 of worker instances can be dynamically scaled, up or down, and all the
 connection and reconnection logic will be handled internally.
 
-Distribute messages from one dynamically-scaled service to another
-------------------------------------------------------------------
+❕❕❕ Distribute messages from one dynamically-scaled service to another
+---------------------------------------------------------------------------
 
 If both services need to be dynamically-scaled, and can have
 varying numbers of instances at any time, we can no longer rely
@@ -596,8 +610,8 @@ why it might not be as bad as you think:
 #. We can still run multiple instances of our proxy service using an
    earlier technique, as we'll see in the next recipe.
 
-Two dynamically-scaled services, with a scaled fan-in, fan-out proxy
---------------------------------------------------------------------
+❕❕❕❕ Two dynamically-scaled services, with a scaled fan-in, fan-out proxy
+----------------------------------------------------------------------------------
 
 This scenario is exactly like the previous one, except that we're
 nervous about having only a single proxy service, since it is a
@@ -661,8 +675,8 @@ be adequate for most common scenarios.
 
 TODO: more scenarios involving identity (like ROUTER-DEALER)
 
-Secure connections with mutual TLS
-----------------------------------
+🔐 Secure connections with mutual TLS
+-------------------------------------
 
 Secure connectivity is extremely important, *even in an internal
 microservices infrastructure*. From a design perspective, the single
@@ -733,8 +747,8 @@ So if you already know how to work with Python's built-in `SSLContext`
 object, you can already create secure connections with `aiomsg` and
 there's nothing more you need to learn.
 
-Crash course on setting up an ``SSLContext``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+🏫 Crash course on setting up an ``SSLContext``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You might not know how to set up the ``SSLContext`` object.
 Here, I'll give a crash course, but please remember that I am
