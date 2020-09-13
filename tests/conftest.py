@@ -5,12 +5,12 @@ import logging
 import pytest
 
 logging.basicConfig(
-    level="DEBUG",
+    level="WARNING",
     # This formatter will produce clickable links in the PyCharm run window.
     format='%(relativeCreated)6d  %(funcName)20s() %(name)s %(levelname)10s %(message)s "%(pathname)s:%(lineno)d"',
     stream=sys.stdout,
 )
-logging.getLogger("asyncio").setLevel("DEBUG")
+logging.getLogger("asyncio").setLevel("WARNING")
 
 
 @pytest.fixture
