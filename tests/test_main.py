@@ -217,9 +217,6 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
 
     # CLIENTS AND ORCHESTRATION
 
-
-    # TEST
-
     async def inner():
 
         rec_future = asyncio.Future()
