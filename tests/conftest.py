@@ -1,3 +1,4 @@
+import time
 import sys
 import asyncio
 import logging
@@ -16,10 +17,25 @@ logging.getLogger("asyncio").setLevel("DEBUG")
 def loop():
     if sys.platform == "win32":
         ev: asyncio.AbstractEventLoop = asyncio.ProactorEventLoop()
+        asyncio.set_event_loop(ev)
     else:
-        ev: asyncio.AbstractEventLoop = asyncio.new_event_loop()
+        # Buggy Python 3.7 - sometimes `set_event_loop` will fail
+        # immediately after a successful `new_event_loop` call. So
+        # for the sake of the tests, let's try it a few times before
+        # raising.
+        attempts = 5
+        while attempts:
+            ev: asyncio.AbstractEventLoop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(ev)
+                break
+            except RuntimeError:
+                attempts -= 1
+                time.sleep(1.0)
+                continue
+        else:
+            raise Exception('Failed to make a loop successfully.')
 
-    asyncio.set_event_loop(ev)
     try:
         yield ev
     finally:
