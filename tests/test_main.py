@@ -601,3 +601,7 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
         loop.run_until_complete(t)
 
     assert received == sent
+    if sys.platform == "win32":
+        # https://bugs.python.org/issue39232
+        # Extra sleep to let proactor close down properly
+        loop.run_until_complete(asyncio.sleep(5.0))
