@@ -258,7 +258,12 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         with suppress(asyncio.CancelledError):
             await server_task
 
-    loop.run_until_complete(asyncio.wait_for(inner(), 5))
+    try:
+        loop.run_until_complete(asyncio.wait_for(inner(), 5))
+    except RuntimeError as e:
+        if 'closed' in str(e) and sys.platform == 'win32':
+            # proactor bug with SSL on Windows. Still happens on 3.9
+            pass
     assert received
     assert len(received) == 3
     assert received[0] == "Blah"

@@ -38,12 +38,9 @@ def loop():
 
     try:
         yield ev
+    except RuntimeError as e:
+        if 'closed' in str(e) and sys.platform == 'win32':
+            # proactor bug with SSL on Windows. Still happens on 3.9
+            pass
     finally:
-        try:
-            ev.close()
-        except RuntimeError as e:
-            if 'closed' in str(e) and sys.platform == 'win32':
-                # proactor bug with SSL on Windows. Still happens on 3.9
-                pass
-            else:
-                raise
+        ev.close()
