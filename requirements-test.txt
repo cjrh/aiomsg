@@ -1,4 +1,5 @@
 pytest==4.3.0
 pytest-cov
+pytest-flake8
 coveralls
 portpicker
