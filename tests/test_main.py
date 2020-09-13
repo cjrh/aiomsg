@@ -252,7 +252,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         await asyncio.sleep(1.0)
 
         await rec_future  # Wait for the reply
-        [await c.close() for c in clients]
+        await asyncio.gather(*[c.close() for c in clients])
         server_task.cancel()
         await server_task
 
@@ -261,6 +261,10 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     assert len(received) == 3
     assert received[0] == "Blah"
     print(received)
+    if sys.platform == "win32":
+        # https://bugs.python.org/issue39232
+        # Extra sleep to let proactor close down properly
+    loop.run_until_complete(asyncio.sleep(1.0))
 
 
 @pytest.mark.parametrize("ssl_enabled", [True, False])
