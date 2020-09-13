@@ -192,7 +192,16 @@ def test_context_managers(loop):
         run(test(), 2)
 
 
-@pytest.mark.parametrize("ssl_enabled", [False, True])
+@pytest.mark.parametrize("ssl_enabled", [
+    pytest.param(False),
+    pytest.param(
+        True,
+        marks=pytest.mark.xfail(
+            sys.platform == "win32",
+            reason="Proactor loop with SSL bug bpo48829"
+        )
+    ),
+])
 def test_many_connect(loop, ssl_enabled, ssl_contexts):
     """One server, several clients, echo server. In publish mode, each
     of the clients should receive the message."""
