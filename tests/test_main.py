@@ -203,21 +203,16 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     received = []
     port = portpicker.pick_unused_port()
 
-    # SERVER
-
-    async def srv():
-        async with aiomsg.Søcket(send_mode=SendMode.PUBLISH) as s:
-            # 2. Gotta do the connect call
-            await s.bind("127.0.0.1", port=port, ssl_context=ctx_bind)
-            # 3. async for to get the received messages one by one.
-            async for msg in s.messages():
-                await s.send_string(msg.decode().capitalize())
-
-    server_task = loop.create_task(srv())
-
-    # CLIENTS AND ORCHESTRATION
-
     async def inner():
+        async def srv():
+            async with aiomsg.Søcket(send_mode=SendMode.PUBLISH) as s:
+                # 2. Gotta do the connect call
+                await s.bind("127.0.0.1", port=port, ssl_context=ctx_bind)
+                # 3. async for to get the received messages one by one.
+                async for msg in s.messages():
+                    await s.send_string(msg.decode().capitalize())
+
+        server_task = loop.create_task(srv())
 
         rec_future = asyncio.Future()
         await asyncio.sleep(0.1)
@@ -271,8 +266,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     if sys.platform == "win32":
         # https://bugs.python.org/issue39232
         # Extra sleep to let proactor close down properly
-        loop.run_until_complete(asyncio.sleep(1.0))
-    loop.run_until_complete(asyncio.sleep(5.0))
+        loop.run_until_complete(asyncio.sleep(10.0))
 
 
 @pytest.mark.parametrize("ssl_enabled", [True, False])
