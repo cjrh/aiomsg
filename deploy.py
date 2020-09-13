@@ -35,11 +35,11 @@ def main(args):
 
     git_status_output = sp.run("git status".split(), capture_output=True).stdout
     if b"Changes not staged for commit:" in git_status_output:
-        print(f"Repo has uncommitted changes. Cannot continue")
+        print("Repo has uncommitted changes. Cannot continue")
         sys.exit(1)
 
     if b"Untracked files:" in git_status_output:
-        print(f"Repo has untracked files. Cannot continue")
+        print("Repo has untracked files. Cannot continue")
         sys.exit(1)
 
     with open(version_filename, "w", encoding="utf-8") as f:
@@ -49,8 +49,8 @@ def main(args):
     sp.run(shlex.split(f"git commit -m 'Bump version to {new_version}'"), cwd=folder)
     sp.run(f"git tag v{new_version}".split(), cwd=folder)
     if args.push_git:
-        sp.run(f"git push".split(), cwd=folder)
-        sp.run(f"git push --tags".split(), cwd=folder)
+        sp.run("git push".split(), cwd=folder)
+        sp.run("git push --tags".split(), cwd=folder)
 
     sp.run(f"{sys.executable} setup.py bdist_wheel sdist".split(), cwd=folder)
     if args.push_pypi:

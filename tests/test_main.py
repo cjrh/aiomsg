@@ -192,9 +192,19 @@ def test_context_managers(loop):
         run(test(), 2)
 
 
-@pytest.mark.parametrize("ssl_enabled", [False, True])
+@pytest.mark.parametrize("ssl_enabled", [
+    pytest.param(False),
+    pytest.param(
+        True,
+        marks=pytest.mark.xfail(
+            sys.platform == "win32",
+            reason="Proactor loop with SSL bug bpo48829"
+        )
+    ),
+])
 def test_many_connect(loop, ssl_enabled, ssl_contexts):
-    """One server, one client, echo server"""
+    """One server, several clients, echo server. In publish mode, each
+    of the clients should receive the message."""
     ctx_bind = ctx_connect = None
     if ssl_enabled:
         ctx_bind, ctx_connect, *_ = ssl_contexts
@@ -202,19 +212,20 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     received = []
     port = portpicker.pick_unused_port()
 
-    async def srv():
-        server = Søcket(send_mode=SendMode.PUBLISH)
-        await server.bind("127.0.0.1", port, ssl_context=ctx_bind)
-        try:
-            while True:
-                msg = await server.recv_string()
-                await server.send_string(msg.capitalize())
-        except asyncio.CancelledError:
-            await server.close()
-
-    server_task = loop.create_task(srv())
-
     async def inner():
+        async def srv():
+            async with aiomsg.Søcket(send_mode=SendMode.PUBLISH) as s:
+                # 2. Gotta do the connect call
+                await s.bind("127.0.0.1", port=port, ssl_context=ctx_bind)
+                # 3. async for to get the received messages one by one.
+                async for msg in s.messages():
+                    await s.send_string(msg.decode().capitalize())
+
+        # if hasattr(asyncio, 'get_running_loop'):
+        #     loop = asyncio.get_running_loop()
+        # else:
+        #     loop = asyncio.get_event_loop()
+        server_task = loop.create_task(srv())
 
         rec_future = asyncio.Future()
         await asyncio.sleep(0.1)
@@ -237,6 +248,8 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
             print(f"Client received: {message}")
             received.append(message)
             if len(received) == 3:
+                # Once we've received a total of 3 responses (1 for each
+                # client), we know we're done, time to exit)
                 rec_future.set_result(1)
 
         for c in clients:
@@ -249,9 +262,14 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         await asyncio.sleep(1.0)
 
         await rec_future  # Wait for the reply
-        [await c.close() for c in clients]
+        await asyncio.gather(
+            *[c.close() for c in clients],
+            # This is required to absorb the CancelledError from cancellation
+            return_exceptions=True
+        )
         server_task.cancel()
-        await server_task
+        with suppress(asyncio.CancelledError):
+            await server_task
 
     loop.run_until_complete(asyncio.wait_for(inner(), 5))
     assert received
