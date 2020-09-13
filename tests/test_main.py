@@ -272,6 +272,7 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
         # https://bugs.python.org/issue39232
         # Extra sleep to let proactor close down properly
         loop.run_until_complete(asyncio.sleep(1.0))
+    loop.run_until_complete(asyncio.sleep(5.0))
 
 
 @pytest.mark.parametrize("ssl_enabled", [True, False])
