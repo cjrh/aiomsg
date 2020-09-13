@@ -16,7 +16,9 @@ logging.getLogger("asyncio").setLevel("WARNING")
 @pytest.fixture
 def loop():
     if sys.platform == "win32":
-        ev: asyncio.AbstractEventLoop = asyncio.ProactorEventLoop()
+        # Proactor is broken with SSL: https://bugs.python.org/issue39232
+        # ev: asyncio.AbstractEventLoop = asyncio.ProactorEventLoop()
+        ev: asyncio.AbstractEventLoop = asyncio.SelectorEventLoop()
         asyncio.set_event_loop(ev)
     else:
         # Buggy Python 3.7 - sometimes `set_event_loop` will fail

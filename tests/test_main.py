@@ -263,10 +263,6 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
     assert len(received) == 3
     assert received[0] == "Blah"
     print(received)
-    if sys.platform == "win32":
-        # https://bugs.python.org/issue39232
-        # Extra sleep to let proactor close down properly
-        loop.run_until_complete(asyncio.sleep(10.0))
 
 
 @pytest.mark.parametrize("ssl_enabled", [True, False])
