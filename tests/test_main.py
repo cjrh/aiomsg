@@ -193,7 +193,7 @@ def test_context_managers(loop):
 
 
 @pytest.mark.parametrize("ssl_enabled", [False, True])
-def test_many_connect(ssl_enabled, ssl_contexts):
+def test_many_connect(loop, ssl_enabled, ssl_contexts):
     """One server, several clients, echo server. In publish mode, each
     of the clients should receive the message."""
     ctx_bind = ctx_connect = None
@@ -212,10 +212,10 @@ def test_many_connect(ssl_enabled, ssl_contexts):
                 async for msg in s.messages():
                     await s.send_string(msg.decode().capitalize())
 
-        if hasattr(asyncio, 'get_running_loop'):
-            loop = asyncio.get_running_loop()
-        else:
-            loop = asyncio.get_event_loop()
+        # if hasattr(asyncio, 'get_running_loop'):
+        #     loop = asyncio.get_running_loop()
+        # else:
+        #     loop = asyncio.get_event_loop()
         server_task = loop.create_task(srv())
 
         rec_future = asyncio.Future()
@@ -262,7 +262,7 @@ def test_many_connect(ssl_enabled, ssl_contexts):
         with suppress(asyncio.CancelledError):
             await server_task
 
-    asyncio.run(asyncio.wait_for(inner(), 5))
+    loop.run_until_complete(asyncio.wait_for(inner(), 5))
     assert received
     assert len(received) == 3
     assert received[0] == "Blah"
