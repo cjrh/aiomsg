@@ -39,4 +39,6 @@ def loop():
     try:
         yield ev
     finally:
+        # https://bugs.python.org/issue39232
+        ev.run_until_complete(asyncio.sleep(0.1))
         ev.close()
