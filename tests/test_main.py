@@ -211,6 +211,10 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
                 await server.send_string(msg.capitalize())
         except asyncio.CancelledError:
             await server.close()
+        except RuntimeError:
+            # Server is dead
+            pass
+
 
     server_task = loop.create_task(srv())
 
