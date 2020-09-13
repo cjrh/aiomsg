@@ -215,7 +215,6 @@ def test_many_connect(loop, ssl_enabled, ssl_contexts):
             # Server is dead
             pass
 
-
     server_task = loop.create_task(srv())
 
     async def inner():
