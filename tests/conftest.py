@@ -39,6 +39,7 @@ def loop():
     try:
         yield ev
     finally:
-        # https://bugs.python.org/issue39232
-        ev.run_until_complete(asyncio.sleep(0.1))
+        if sys.platform == "win32":
+            # https://bugs.python.org/issue39232
+            ev.run_until_complete(asyncio.sleep(2))
         ev.close()
