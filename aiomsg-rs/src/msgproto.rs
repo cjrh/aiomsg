@@ -16,14 +16,17 @@ async fn read_msg(reader: &mut TcpStream) -> io::Result<Vec<u8>> {
 }
 
 async fn send_msg(writer: &mut TcpStream, data: &[u8]) -> io::Result<()> {
-    let msg = String::from("aiomsg-heartbeat");
-    let msg_bytes = msg.as_bytes();
-    let size_bytes = (msg_bytes.len() as i32).to_be_bytes();
+    let size_bytes = (data.len() as i32).to_be_bytes();
     trace!("Size as a u32: {:?}", &size_bytes);
-    assert_eq!(size_bytes, [0x00, 0x00, 0x00, 0x10]);
 
     writer.write_all(&size_bytes).await?;
-    writer.write_all(msg_bytes).await?;
+    writer.write_all(data).await?;
+    Ok(())
+}
+
+async fn send_string(writer: &mut TcpStream, string: &str) -> io::Result<()> { 
+    let msg_bytes = string.as_bytes();
+    send_msg(writer, msg_bytes).await?;
     Ok(())
 }
 
@@ -53,7 +56,7 @@ mod tests {
                 let listener = TcpListener::bind("127.0.0.1:27001").await?;
                 let (mut stream, addr) = listener.accept().await?;
                 let received = read_msg(&mut stream).await?;
-                println!("{:?}", String::from_utf8_lossy(&received));
+                trace!("{:?}", String::from_utf8_lossy(&received));
                 assert_eq!(
                     String::from_utf8_lossy(&received),
                     "aiomsg-heartbeat"
@@ -78,7 +81,41 @@ mod tests {
 
                 stream.write_all(&size_bytes).await?;
                 stream.write_all(msg_bytes).await?;
-                println!("client: sent bytes, exiting.");
+                Ok(())
+            }
+
+            let server_task = task::spawn(server());
+            let client_task = task::spawn(client());
+            server_task.await.unwrap(); // actual test
+            client_task.await.unwrap(); // cleanup
+        })
+    }
+
+    #[test]
+    fn test_send_msg() {
+        async_std::task::block_on(async {
+            async fn server() -> io::Result<()> {
+                let listener = TcpListener::bind("127.0.0.1:27002").await?;
+                let (mut stream, addr) = listener.accept().await?;
+                let received = read_msg(&mut stream).await?;
+                trace!("{:?}", String::from_utf8_lossy(&received));
+                assert_eq!(
+                    String::from_utf8_lossy(&received),
+                    "hello there"
+                );
+                Ok(())
+            }
+
+            async fn client() -> io::Result<()> {
+                let mut stream = match future::timeout(
+                    Duration::from_secs(1),
+                    TcpStream::connect("127.0.0.1:27002"),
+                ).await {
+                    Ok(s) => s?,
+                    TimeoutError => panic!("Timed out")
+                };
+
+                send_string(&mut stream, "hello there").await?;
                 Ok(())
             }
 
