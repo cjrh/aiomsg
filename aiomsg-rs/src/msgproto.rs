@@ -15,6 +15,12 @@ async fn read_msg(reader: &mut TcpStream) -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
+async fn read_string(reader: &mut TcpStream) -> io::Result<String> {
+    let bytes = read_msg(reader).await?;
+    let result: String = String::from_utf8_lossy(&bytes).to_string();
+    Ok(result)
+}
+
 async fn send_msg(writer: &mut TcpStream, data: &[u8]) -> io::Result<()> {
     let size_bytes = (data.len() as i32).to_be_bytes();
     trace!("Size as a u32: {:?}", &size_bytes);
@@ -24,7 +30,7 @@ async fn send_msg(writer: &mut TcpStream, data: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-async fn send_string(writer: &mut TcpStream, string: &str) -> io::Result<()> { 
+async fn send_string(writer: &mut TcpStream, string: &str) -> io::Result<()> {
     let msg_bytes = string.as_bytes();
     send_msg(writer, msg_bytes).await?;
     Ok(())
