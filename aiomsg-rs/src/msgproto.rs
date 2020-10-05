@@ -1,6 +1,8 @@
 use std::convert::{TryFrom, TryInto};
-use async_std::net::{TcpStream, TcpListener};
+
+use log::{info, trace, warn, error};
 use async_std::prelude::*;
+use async_std::net::{TcpStream, TcpListener};
 use async_std::{io, task};
 
 async fn read_msg(reader: &mut TcpStream) -> io::Result<Vec<u8>> {
@@ -13,9 +15,22 @@ async fn read_msg(reader: &mut TcpStream) -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
+async fn send_msg(writer: &mut TcpStream, data: &[u8]) -> io::Result<()> {
+    let msg = String::from("aiomsg-heartbeat");
+    let msg_bytes = msg.as_bytes();
+    let size_bytes = (msg_bytes.len() as i32).to_be_bytes();
+    trace!("Size as a u32: {:?}", &size_bytes);
+    assert_eq!(size_bytes, [0x00, 0x00, 0x00, 0x10]);
+
+    writer.write_all(&size_bytes).await?;
+    writer.write_all(msg_bytes).await?;
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
+    extern crate pretty_env_logger;
     use std::time::Duration;
 
     use super::*;
@@ -26,6 +41,8 @@ mod tests {
 
     #[test]
     fn it_works() {
+        std::env::set_var("RUST_LOG", "info");
+        pretty_env_logger::init();
         assert_eq!(2 + 2, 4);
     }
 
@@ -56,7 +73,7 @@ mod tests {
                 let msg = String::from("aiomsg-heartbeat");
                 let msg_bytes = msg.as_bytes();
                 let size_bytes = (msg_bytes.len() as i32).to_be_bytes();
-                println!("Size as a u32: {:?}", &size_bytes);
+                info!("Size as a u32: {:?}", &size_bytes);
                 assert_eq!(size_bytes, [0x00, 0x00, 0x00, 0x10]);
 
                 stream.write_all(&size_bytes).await?;
