@@ -1,6 +1,6 @@
 use crate::aiomsg_types::{DeliveryGuarantee, Identity, Payload, SendMode};
 use crate::msgproto;
-use crate::utils::{hexify, hexify_vec, stringify};
+use crate::utils::{hexify, stringify};
 use async_std::net::TcpStream;
 use async_std::{prelude::*, task};
 use futures::channel::mpsc;
@@ -48,7 +48,7 @@ pub async fn broker_loop(
                 match send_mode {
                     SendMode::Publish => {
                         info!("publish to all peers");
-                        for (id, mut sender) in &peers {
+                        for (_id, mut sender) in &peers {
                             sender.send(msg.clone()).await?;
                         }
                     }

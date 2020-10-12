@@ -13,18 +13,18 @@ use async_std::{io, task};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
 use futures::sink::SinkExt;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info};
 use std::collections::BTreeMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::fmt;
-use std::future::Future;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use utils::hexify;
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
+type Result<T> =
+    std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub struct Socket {
     pub send_mode: SendMode,
@@ -34,7 +34,6 @@ pub struct Socket {
     // Internal stuff from here
     send_into_broker: Mutex<Sender<broker::Event>>,
     // Extras
-    at_least_one_connection: bool,
     waiting_for_acks: BTreeMap<Identity, TcpStream>,
     // Tasks (joinhandles)
     sender_task: Mutex<Option<task::JoinHandle<()>>>,
@@ -67,15 +66,14 @@ impl Socket {
 
         let (send_from_conn_loop, recv_receiver) = mpsc::unbounded();
 
-        let mut sock = Socket {
-            send_mode: send_mode,
+        let sock = Socket {
+            send_mode,
             delivery_guarantee: DeliveryGuarantee::AtMostOnce,
             identity: *uuid::Uuid::new_v4().as_bytes(),
             reconnection_delay: 0.1,
             // These fields private
             // send_queue_receiver: sq_receiver,
             // send_queue_sender: sq_sender,
-            at_least_one_connection: false,
             waiting_for_acks: BTreeMap::new(),
             sender_task: Mutex::new(None),
             send_into_broker: Mutex::new(send_into_broker),
@@ -83,16 +81,7 @@ impl Socket {
             recv_receiver: Mutex::new(recv_receiver),
         };
 
-        let mut a = Arc::new(sock);
-        // let clone = a.clone();
-        // let f = clone.sender_main();
-        // let x = task::spawn(f);
-        //
-        // {
-        //     let mut sender_task = a.sender_task.lock().unwrap();
-        //     *sender_task = Some(x);
-        // }
-        a
+        Arc::new(sock)
     }
     pub fn set_send_mode(&mut self, value: SendMode) -> &mut Socket {
         self.send_mode = value;
@@ -115,7 +104,7 @@ impl Socket {
     }
 
     pub async fn test_call(self: Arc<Socket>) {
-        for i in 0..3 {
+        for _i in 0..3 {
             task::sleep(Duration::from_millis(50)).await;
             info!("{:?}", &self);
         }
@@ -146,7 +135,7 @@ impl Socket {
         hostname: &str,
         port: u32,
         ssl_context: Option<u32>,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         // TODO: this should actually spawn a long-running task that will
         //  keep connecting every time the connection drops.
         info!(
@@ -159,7 +148,7 @@ impl Socket {
         let addr = format!("{}:{}", hostname, port);
         let clone = self.clone();
 
-        let mut stream = match future::timeout(
+        let stream = match future::timeout(
             Duration::from_secs(5),
             TcpStream::connect(addr),
         )
@@ -197,31 +186,33 @@ impl Socket {
 
     async fn connection_loop(
         self: Arc<Socket>,
-        mut stream: TcpStream,
-    ) -> io::Result<()> {
+        stream: TcpStream,
+    ) -> Result<()> {
         // 1. Send my own identity
         info!("Send my id: {}", hexify(&self.identity, 4));
-        msgproto::send_msg(&mut stream, &self.identity).await;
+        msgproto::send_msg(&stream, &self.identity).await?;
         // 2. Get the other side's identity
-        if let Some(other_identity) = msgproto::read_msg(&mut stream).await {
-            info!("Got other identity: {}", hexify(&other_identity, 4));
+        let prospective_identity = msgproto::read_msg(&stream).await;
+        if prospective_identity.is_none() {
+            error!("Didn't get identity, bailing.");
+            return Ok(());
         };
+        let other_identity_vec = prospective_identity.unwrap();
+        let mut other_identity: Identity = [0; 16];
+        other_identity.clone_from_slice(&other_identity_vec[..]);
+        info!("Got other identity: {}", hexify(&other_identity, 4));
 
         // 3. Add this peer to my mapping of active connections
         let stream = Arc::new(stream);
-        let reader = BufReader::new(&*stream);
         {
             let mut broker = self.send_into_broker.lock().await;
             broker
                 .send(broker::Event::NewPeer {
-                    name: self.identity,
+                    name: other_identity,
                     stream: Arc::clone(&stream),
                 })
-                .await;
+                .await?;
         }
-
-        let mut x: &TcpStream = &*stream;
-        let identity = msgproto::read_msg(x);
 
         // 4. Receiving messages from this connection
         while let Some(bytes) = msgproto::read_msg(&stream).await {
@@ -231,7 +222,7 @@ impl Socket {
             {
                 let mut sender = self.send_from_conn_loop.lock().await;
                 info!("sending data into channel: {}", hexify(&bytes, 4));
-                sender.send(bytes).await;
+                sender.send(bytes).await?;
             }
         }
         Ok(())
@@ -252,7 +243,7 @@ impl Socket {
         }
     }
 
-    async fn send(self: &Arc<Socket>, msg: &[u8]) -> io::Result<()> {
+    async fn send(self: &Arc<Socket>, msg: &[u8]) -> Result<()> {
         // 1. Put message onto a channel for sending
         let mut broker = self.send_into_broker.lock().await;
         broker
@@ -261,7 +252,7 @@ impl Socket {
                 to: vec![],
                 msg: msg.to_vec(),
             })
-            .await;
+            .await?;
         Ok(())
     }
 }
@@ -295,22 +286,22 @@ mod tests {
         info!("Running sock_broker");
         let _addr = test_utils::get_addr();
 
-        async fn client() -> io::Result<()> {
+        async fn client() -> Result<()> {
             async_std::task::sleep(Duration::from_secs(3)).await;
-            let mut sock = Socket::new();
+            let sock = Socket::new();
             sock.connect("127.0.0.1", 27005, None).await?;
-            sock.send(b"blah1").await;
-            sock.send(b"blah2").await;
-            sock.send(b"blah3").await;
+            sock.send(b"blah1").await?;
+            sock.send(b"blah2").await?;
+            sock.send(b"blah3").await?;
             Ok(())
         }
 
         async fn server() -> io::Result<Vec<String>> {
             let mut result = vec![];
-            let mut sock = Socket::new();
+            let sock = Socket::new();
             sock.bind("127.0.0.1", 27005, None).await?;
             let rng: std::ops::Range<u32> = 0..3;
-            for i in rng {
+            for _i in rng {
                 match sock.recv().await? {
                     Some(msg) => {
                         info!("Received: {:?}", &msg);

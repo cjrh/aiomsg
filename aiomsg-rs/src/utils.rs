@@ -6,7 +6,7 @@ pub fn hexify(data: &[u8], maxlen: usize) -> String {
         .join("")
 }
 
-pub fn hexify_vec(data: &[&[u8]], maxlen: usize) -> Vec<String> {
+pub fn _hexify_vec(data: &[&[u8]], maxlen: usize) -> Vec<String> {
     data.iter().map(|v| hexify(v, maxlen)).collect()
 }
 

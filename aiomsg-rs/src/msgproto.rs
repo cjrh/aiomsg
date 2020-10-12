@@ -1,6 +1,6 @@
 use async_std::io;
 // use async_std::net::{TcpListener, TcpStream};
-use async_std::io::BufReader;
+use async_std::io::{BufReader, Read};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use futures::io::{AsyncRead, AsyncWrite, ReadExact};
@@ -83,7 +83,7 @@ mod tests {
     async fn server(addr: String) -> io::Result<Vec<String>> {
         async fn connection(stream: &TcpStream) -> io::Result<Vec<String>> {
             let mut received_messages: Vec<String> = vec![];
-            while let Some(bytes) = read_msg(&stream).await {
+            while let Some(bytes) = read_msg(stream).await {
                 let s = String::from_utf8_lossy(&bytes).to_string();
                 received_messages.push(s);
             }
