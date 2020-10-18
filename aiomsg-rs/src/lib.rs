@@ -13,6 +13,9 @@ use async_std::{io, task};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
 use futures::sink::SinkExt;
+// This makes "incoming.next()" available, although curiously,
+// the code runs without this import being required!
+use futures::stream::StreamExt;
 use log::{debug, error, info};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
