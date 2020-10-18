@@ -47,6 +47,27 @@ pub enum AiomsgError {
 
 pub type Result<T> = std::result::Result<T, AiomsgError>;
 
+pub struct PeerConfig {
+    pub host: String,
+    pub port: u32,
+    pub ssl_context: Option<u32>,
+}
+
+impl PeerConfig {
+    pub fn new(host: &str, port: u32) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+            ssl_context: None,
+        }
+    }
+
+    pub fn ssl_context(&mut self, ctx: u32) -> &mut Self {
+        self.ssl_context = Some(ctx);
+        self
+    }
+}
+
 pub struct Socket {
     pub send_mode: SendMode,
     pub delivery_guarantee: DeliveryGuarantee,
@@ -82,8 +103,7 @@ impl Socket {
     pub fn new() -> Arc<Socket> {
         let (send_into_broker, broker_receiver) = mpsc::unbounded();
         let send_mode = SendMode::RoundRobin;
-        let _broker_handle =
-            task::spawn(broker::broker_loop(broker_receiver, send_mode));
+        let _broker_handle = task::spawn(broker::broker_loop(broker_receiver, send_mode));
 
         let (send_from_conn_loop, recv_receiver) = mpsc::unbounded();
 
@@ -108,10 +128,7 @@ impl Socket {
         self.send_mode = value;
         self
     }
-    pub fn set_delivery_guarantee(
-        &mut self,
-        value: DeliveryGuarantee,
-    ) -> &mut Socket {
+    pub fn set_delivery_guarantee(&mut self, value: DeliveryGuarantee) -> &mut Socket {
         self.delivery_guarantee = value;
         self
     }
@@ -151,12 +168,24 @@ impl Socket {
         Ok(())
     }
 
-    pub async fn connect(
-        self: &Arc<Socket>,
-        hostname: &str,
+    pub async fn connect(self: &Arc<Socket>, peer_config: &PeerConfig) -> Result<()> {
+        let clone = self.clone();
+        task::spawn(clone.connector_loop(
+            // TODO: implement Clone on PeerConfig to pass it through
+            peer_config.host.clone(),
+            peer_config.port,
+            peer_config.ssl_context,
+        ));
+        Ok(())
+    }
+
+    async fn connector_loop<T: Into<String>>(
+        self: Arc<Socket>,
+        hostname: T,
         port: u32,
         ssl_context: Option<u32>,
     ) -> Result<()> {
+        let hostname = hostname.into();
         // TODO: this should actually spawn a long-running task that will
         //  keep connecting every time the connection drops.
         info!(
@@ -169,12 +198,7 @@ impl Socket {
         let addr = format!("{}:{}", hostname, port);
         let clone = self.clone();
 
-        let stream = match future::timeout(
-            Duration::from_secs(5),
-            TcpStream::connect(addr),
-        )
-        .await
-        {
+        let stream = match future::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await {
             Ok(s) => s?,
             Err(_) => panic!("Timed out"),
         };
@@ -190,10 +214,7 @@ impl Socket {
         Ok(())
     }
 
-    pub async fn accept_loop(
-        self: Arc<Socket>,
-        addr: String,
-    ) -> io::Result<()> {
+    pub async fn accept_loop(self: Arc<Socket>, addr: String) -> io::Result<()> {
         let listener = TcpListener::bind(addr).await?;
         let mut incoming = listener.incoming();
         while let Some(stream) = incoming.next().await {
@@ -205,10 +226,7 @@ impl Socket {
         Ok(())
     }
 
-    async fn connection_loop(
-        self: Arc<Socket>,
-        stream: TcpStream,
-    ) -> Result<()> {
+    async fn connection_loop(self: Arc<Socket>, stream: TcpStream) -> Result<()> {
         // 1. Send my own identity
         info!("Send my id: {}", hexify(&self.identity, 4));
         msgproto::send_msg(&stream, &self.identity).await?;

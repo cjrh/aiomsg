@@ -1,6 +1,7 @@
 mod test_utils;
 
-use aiomsg_rs::{Result, Socket};
+use aiomsg_rs::{PeerConfig, Result, Socket};
+use async_std::sync::Arc;
 use async_std::{io, task};
 use log::info;
 use std::time::Duration;
@@ -32,22 +33,28 @@ async fn crate_socket_run_async_method() {
 async fn crate_sock_broker() -> io::Result<()> {
     info!("Running sock_broker");
     let _addr = test_utils::get_addr();
+    let peer = Arc::new(PeerConfig::new("127.0.0.1", 27005));
 
-    async fn client() -> Result<()> {
-        async_std::task::sleep(Duration::from_secs(3)).await;
+    async fn client(peer: Arc<PeerConfig>) -> Result<()> {
+        async_std::task::sleep(Duration::from_secs(1)).await;
         let sock = Socket::new();
-        sock.connect("127.0.0.1", 27005, None).await?;
+        sock.connect(&peer).await?;
+        async_std::task::sleep(Duration::from_secs(1)).await;
         sock.send(b"blah1").await?;
         sock.send(b"blah2").await?;
         sock.send(b"blah3").await?;
+        info!("Leaving client...");
         Ok(())
     }
 
-    async fn server() -> io::Result<Vec<String>> {
+    async fn server(peer: Arc<PeerConfig>) -> io::Result<Vec<String>> {
         let mut result = vec![];
         let sock = Socket::new();
+        // TODO: change the sig for bind too
+        // sock.bind(peer).await?;
         sock.bind("127.0.0.1", 27005, None).await?;
         let rng: std::ops::Range<u32> = 0..3;
+        info!("Waiting for messages...");
         for _i in rng {
             match sock.recv().await? {
                 Some(msg) => {
@@ -57,11 +64,13 @@ async fn crate_sock_broker() -> io::Result<()> {
                 None => break,
             }
         }
+        info!("Leaving server");
         Ok(result)
     }
 
-    task::spawn(client());
-    let received = server().await?;
+    info!("Spawning client");
+    task::spawn(client(peer.clone()));
+    let received = server(peer.clone()).await?;
     info!("This was received: {:?}", &received);
     assert_eq!(received, vec!["blah1", "blah2", "blah3"]);
     Ok(())
