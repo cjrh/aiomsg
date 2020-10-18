@@ -13,7 +13,12 @@ pretty_env_logger = "0.4.0"
 tokio = { version = "0.2", features = ["full"] }
 portpicker = "0.1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+thiserror = "1.0.21"
 
 [dependencies.async-std]
 version = "1.6.5"
 features = ["attributes"]
+
+[dependencies.async-tls]
+version = "0.8"
+default-features = true
