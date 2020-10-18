@@ -100,7 +100,7 @@ async fn connection_writer_loop(
     mut messages: Receiver<Payload>,
     stream: Arc<TcpStream>, // 3
 ) -> Result<()> {
-    let mut stream = &*stream;
+    let stream = &*stream;
     while let Some(msg) = messages.next().await {
         info!("Sending msg to peer: {}", stringify(&msg, 20));
         msgproto::send_msg(stream, &msg).await?;
