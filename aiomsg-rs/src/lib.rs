@@ -22,12 +22,31 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+use thiserror::Error;
 use utils::hexify;
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
-type Result<T> =
-    std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+// pub type Result<T> =
+//     std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Error, Debug)]
+pub enum AiomsgError {
+    #[error("Failed to connect")]
+    Unknown,
+    #[error("async_std error")]
+    Io {
+        #[from]
+        source: io::Error,
+    },
+    #[error("async_std error")]
+    Async {
+        #[from]
+        source: mpsc::SendError,
+    },
+}
+
+pub type Result<T> = std::result::Result<T, AiomsgError>;
 
 pub struct Socket {
     pub send_mode: SendMode,
