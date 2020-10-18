@@ -62,6 +62,16 @@ impl PeerConfig {
         }
     }
 
+    pub fn host(&mut self, host: &str) -> &mut Self {
+        self.host = host.to_string();
+        self
+    }
+
+    pub fn port(&mut self, port: u32) -> &mut Self {
+        self.port = port;
+        self
+    }
+
     pub fn ssl_context(&mut self, ctx: u32) -> &mut Self {
         self.ssl_context = Some(ctx);
         self
