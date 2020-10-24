@@ -1,0 +1,30 @@
+Features:
+
+Basic features
+[ ] bind
+[X] connect
+[ ] trade identity
+
+Extended feature (virtual socket)
+[ ] multiple bind
+[ ] multiple connect
+
+Reconnection
+[ ] reconnection if bind end drops
+[ ] buffering for sends without destination available
+[ ] buffer until limit, then back-pressure at `.send.await?` call site
+[ ] When trying to reconnect, backoff delay, with random jitter
+
+Send: Distribution models
+[ ] mode: publish
+[ ] mode: round-robin
+[ ] mode: identity
+
+Heartbeating:
+[ ] heartbeats receive process without error
+[ ] heartbeat sending
+[ ] reconnect if heartbeat not received in X seconds
+
+Delivery Guarantee
+[ ] At most once mode (default)
+[ ] At least once mode (retry if no ack received in X seconds)

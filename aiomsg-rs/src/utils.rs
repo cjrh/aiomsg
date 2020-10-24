@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 pub fn hexify(data: &[u8], maxlen: usize) -> String {
     data.iter()
         .take(maxlen)
@@ -12,4 +14,8 @@ pub fn _hexify_vec(data: &[&[u8]], maxlen: usize) -> Vec<String> {
 
 pub fn stringify(data: &[u8], maxlen: usize) -> String {
     String::from_utf8_lossy(data).chars().take(maxlen).collect()
+}
+
+pub async fn sleep(secs: u64) {
+    async_std::task::sleep(Duration::from_secs(secs)).await;
 }

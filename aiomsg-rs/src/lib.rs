@@ -22,7 +22,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use utils::hexify;
+use utils::{hexify, sleep};
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
@@ -84,7 +84,7 @@ pub struct Socket {
     pub identity: Identity,
     pub reconnection_delay: f64,
     // Internal stuff from here
-    send_into_broker: Mutex<Sender<broker::Event>>,
+    send_into_broker: Arc<Mutex<Sender<broker::Event>>>,
     // Extras
     waiting_for_acks: BTreeMap<Identity, TcpStream>,
     // Tasks (joinhandles)
@@ -112,8 +112,10 @@ impl fmt::Debug for Socket {
 impl Socket {
     pub fn new() -> Arc<Socket> {
         let (send_into_broker, broker_receiver) = mpsc::unbounded();
+        let sib = Arc::new(Mutex::new(send_into_broker));
         let send_mode = SendMode::RoundRobin;
-        let _broker_handle = task::spawn(broker::broker_loop(broker_receiver, send_mode));
+        let clone = sib.clone();
+        let _broker_handle = task::spawn(broker::broker_loop(broker_receiver, clone, send_mode));
 
         let (send_from_conn_loop, recv_receiver) = mpsc::unbounded();
 
@@ -127,7 +129,7 @@ impl Socket {
             // send_queue_sender: sq_sender,
             waiting_for_acks: BTreeMap::new(),
             sender_task: Mutex::new(None),
-            send_into_broker: Mutex::new(send_into_broker),
+            send_into_broker: sib,
             send_from_conn_loop: Mutex::new(send_from_conn_loop),
             recv_receiver: Mutex::new(recv_receiver),
         };
@@ -205,22 +207,59 @@ impl Socket {
             &port,
         );
 
-        let addr = format!("{}:{}", hostname, port);
-        let clone = self.clone();
+        let mut reconnecting: bool = false;
+        let mut backoff = (1u64..5u64).step_by(2).chain(std::iter::repeat(9u64));
 
-        let stream = match future::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await {
-            Ok(s) => s?,
-            Err(_) => panic!("Timed out"),
-        };
+        loop {
+            if reconnecting {
+                sleep(backoff.next().unwrap()).await;
+            }
+            if !reconnecting {
+                reconnecting = true
+            };
+            let addr = format!("{}:{}", hostname, port);
+            let clone = self.clone();
+            let dt = Duration::from_secs(1);
+            let stream = match future::timeout(dt, TcpStream::connect(addr.clone())).await {
+                Ok(s) => match s {
+                    Ok(s) => {
+                        info!("Successful connection");
+                        // Recreate the backoff sequence
+                        backoff = (1u64..5u64).step_by(2).chain(std::iter::repeat(9u64));
+                        s
+                    }
+                    Err(e) => {
+                        info!("Got error connecting to {}: {}", &addr, &e);
 
-        // let mut identity: Identity = [0; 16];
-        // // TODO: assert length of first_msg is 16 exactly.
-        // identity.clone_from_slice(&first_msg[..]);
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    info!("Timed out connecting to {}", &addr);
+                    continue;
+                }
+            };
 
-        let _handle = task::spawn(clone.connection_loop(stream));
-        // TODO: get rid of this, just a pause to make sure the connection
-        // is registered before "sends" can happen.
-        async_std::task::sleep(Duration::from_secs(1)).await;
+            // let mut identity: Identity = [0; 16];
+            // // TODO: assert length of first_msg is 16 exactly.
+            // identity.clone_from_slice(&first_msg[..]);
+
+            match clone.connection_loop(stream).await {
+                Ok(_) => {
+                    info!("Peer disconnected. Will try to reconnect.");
+                    continue;
+                }
+                Err(e) => {
+                    info!("Got this error: {}", e);
+                    continue;
+                }
+            };
+            // TODO: get rid of this, just a pause to make sure the connection
+            // is registered before "sends" can happen.
+            sleep(1).await;
+
+            // TODO: make a way to close a connection
+        }
         Ok(())
     }
 

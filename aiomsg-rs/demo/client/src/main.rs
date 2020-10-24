@@ -1,16 +1,26 @@
-use aiomsg_rs::Socket;
+use aiomsg_rs::{PeerConfig, Socket};
 use anyhow::Result;
 use std::time::Duration;
 
-#[async_std::main]
-async fn main() -> Result<()> {
+
+async fn test1() -> Result<()> {
     println!("Hello, world!");
     let sock = Socket::new();
-    sock.connect("127.0.0.1", 61111, None).await?;
-    for _i in 0..10 {
+    println!("sock: {:?}", &sock);
+    let cfg = PeerConfig::new("127.0.0.1", 61111);
+    sock.connect(&cfg).await?;
+    async_std::task::sleep(Duration::from_millis(1000)).await;
+    for _i in 0..100 {
         sock.send(b"test").await?;
         async_std::task::sleep(Duration::from_millis(1000)).await;
     }
-    println!("Done");
+    Ok(())
+}
+
+#[async_std::main]
+async fn main() -> Result<()> {
+    std::env::set_var("RUST_LOG", "info");
+    pretty_env_logger::init();
+    test1().await?;
     Ok(())
 }
