@@ -18,7 +18,7 @@ async fn test1() -> Result<()> {
 #[async_std::main]
 async fn main() -> Result<()> {
     std::env::set_var("RUST_LOG", "info");
-    pretty_env_logger::init();
+    pretty_env_logger::init_timed();
     test1().await?;
     Ok(())
 }

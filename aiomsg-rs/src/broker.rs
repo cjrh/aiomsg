@@ -129,7 +129,7 @@ async fn connection_writer_loop(
                 info!("Got error: {}", &e);
                 // This *should* make the "read" end also disconnect, which will initiate
                 // reconnection. Check the code in the connector loop.
-                match stream.shutdown(std::net::Shutdown::Both) {
+                match stream.shutdown(std::net::Shutdown::Read) {
                     Ok(()) => {
                         trace!("Shutdown successful");
                     }

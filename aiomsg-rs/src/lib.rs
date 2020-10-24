@@ -2,7 +2,7 @@ mod aiomsg_types;
 mod broker;
 mod msgproto;
 mod test_utils;
-mod utils;
+pub mod utils; // This is pub only for doctests
 
 use async_std::future;
 use async_std::net::{TcpListener, TcpStream};
@@ -14,6 +14,7 @@ use futures::lock::Mutex;
 use futures::sink::SinkExt;
 // This makes "incoming.next()" available, although curiously,
 // the code runs without this import being required!
+use crate::utils::backoff_seq;
 use futures::stream::StreamExt;
 use log::{debug, error, info};
 use std::collections::BTreeMap;
@@ -208,7 +209,7 @@ impl Socket {
         );
 
         let mut reconnecting: bool = false;
-        let mut backoff = (1u64..5u64).step_by(2).chain(std::iter::repeat(9u64));
+        let mut backoff = backoff_seq(0.001, 5.0, 10);
 
         loop {
             if reconnecting {
@@ -225,7 +226,7 @@ impl Socket {
                     Ok(s) => {
                         info!("Successful connection");
                         // Recreate the backoff sequence
-                        backoff = (1u64..5u64).step_by(2).chain(std::iter::repeat(9u64));
+                        backoff = backoff_seq(0.001, 5.0, 10);
                         s
                     }
                     Err(e) => {
