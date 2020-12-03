@@ -8,7 +8,7 @@ attrs==20.2.0             # via pytest
 certifi==2020.6.20        # via requests
 chardet==3.0.4            # via requests
 coverage==5.2.1           # via coveralls, pytest-cov
-coveralls==2.1.2          # via -r requirements-test.in
+coveralls==2.2.0          # via -r requirements-test.in
 docopt==0.6.2             # via coveralls
 flake8==3.8.3             # via pytest-flake8
 idna==2.10                # via requests
