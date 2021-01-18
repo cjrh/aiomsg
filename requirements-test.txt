@@ -21,7 +21,7 @@ py==1.9.0                 # via pytest
 pycodestyle==2.6.0        # via flake8
 pyflakes==2.2.0           # via flake8
 pyparsing==2.4.7          # via packaging
-pytest-cov==2.10.1        # via -r requirements-test.in
+pytest-cov==2.11.0        # via -r requirements-test.in
 pytest-flake8==1.0.6      # via -r requirements-test.in
 pytest==6.1.2             # via -r requirements-test.in, pytest-cov, pytest-flake8
 requests==2.24.0          # via coveralls
