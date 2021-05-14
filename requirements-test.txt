@@ -10,7 +10,7 @@ certifi==2020.6.20
     # via requests
 chardet==3.0.4
     # via requests
-coverage==5.2.1
+coverage[toml]==5.2.1
     # via
     #   coveralls
     #   pytest-cov
@@ -40,7 +40,7 @@ pyflakes==2.2.0
     # via flake8
 pyparsing==2.4.7
     # via packaging
-pytest-cov==2.11.1
+pytest-cov==2.12.0
     # via -r requirements-test.in
 pytest-flake8==1.0.7
     # via -r requirements-test.in
@@ -54,6 +54,8 @@ requests==2.24.0
 six==1.15.0
     # via packaging
 toml==0.10.1
-    # via pytest
+    # via
+    #   coverage
+    #   pytest
 urllib3==1.25.10
     # via requests
