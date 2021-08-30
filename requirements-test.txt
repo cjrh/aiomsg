@@ -40,15 +40,15 @@ pyflakes==2.2.0
     # via flake8
 pyparsing==2.4.7
     # via packaging
-pytest-cov==2.11.1
-    # via -r requirements-test.in
-pytest-flake8==1.0.7
-    # via -r requirements-test.in
-pytest==6.2.3
+pytest==6.2.5
     # via
     #   -r requirements-test.in
     #   pytest-cov
     #   pytest-flake8
+pytest-cov==2.11.1
+    # via -r requirements-test.in
+pytest-flake8==1.0.7
+    # via -r requirements-test.in
 requests==2.24.0
     # via coveralls
 six==1.15.0
