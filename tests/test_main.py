@@ -499,10 +499,7 @@ def test_connection(loop):
 
         async def cb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             nonlocal cb_task
-            if sys.version_info <= (3, 7):
-                cb_task = asyncio.Task.current_task()
-            else:
-                cb_task = asyncio.current_task()
+            cb_task = asyncio.current_task()
             try:
                 while True:
                     try:
