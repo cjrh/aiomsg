@@ -1,3 +1,4 @@
+from typing import Iterator
 import asyncio
 import logging
 from contextlib import contextmanager
@@ -20,7 +21,7 @@ def run(coro, timeout=1000):
 
 
 @contextmanager
-def new_sock(*args, **kwargs) -> Søcket:
+def new_sock(*args, **kwargs) -> Iterator[Søcket]:
     sock = Søcket(*args, **kwargs)
     try:
         yield sock
@@ -29,14 +30,14 @@ def new_sock(*args, **kwargs) -> Søcket:
 
 
 @contextmanager
-def bind_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Søcket:
+def bind_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Iterator[Søcket]:
     with new_sock(**kwargs) as sock:
         run(sock.bind(host, port, ssl_context=ssl_context))
         yield sock
 
 
 @contextmanager
-def conn_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Søcket:
+def conn_sock(host="127.0.0.1", port=25000, ssl_context=None, **kwargs) -> Iterator[Søcket]:
     with new_sock(**kwargs) as sock:
         run(sock.connect(host, port, ssl_context=ssl_context))
         yield sock
