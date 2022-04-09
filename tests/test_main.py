@@ -432,7 +432,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                         stderr=sp.STDOUT,
                     )
                     logger.info("SERVER IS UP")
-                    await asyncio.sleep(uniform(1, 5))
+                    await asyncio.sleep(uniform(2, 5))
                 except Exception:
                     logger.exception("Error running the echo server")
                 finally:
