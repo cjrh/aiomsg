@@ -359,12 +359,12 @@ class Søcket:
             self.server.close()
             await self.server.wait_closed()
 
-        self.sender_task.cancel()
-        await self.sender_task
-
         await asyncio.gather(
             *(c.close() for c in self._connections.values()), return_exceptions=True
         )
+
+        self.sender_task.cancel()
+        await self.sender_task
 
         for task in self._tasks:
             task.cancel()
@@ -375,9 +375,12 @@ class Søcket:
     async def close(self, timeout=10):
         try:
             await asyncio.wait_for(self._close(), timeout)
-            assert self.sender_task.done()
         except asyncio.TimeoutError:
             logger.exception("Timed out during close:")
+
+
+        if not self.sender_task.done():
+            logger.warning('sender_task was not complete.')
 
     def raw_recv(self, identity: bytes, message: bytes):
         """Called when *any* active connection receives a message."""
@@ -437,7 +440,10 @@ class Søcket:
         # a little bookkeeping to remove the message id from the "waiting for
         # acks" dict, and as before, give the received data to the application.
         logger.debug(f"Got an REP: {parts}")
-        assert parts.msg_type == "REP"  # Nothing else should be possible.
+        if parts.msg_type != "REP":  # pragma: no cover
+            # Nothing else should be possible.
+            raise SystemError('Unexpected msg_type: ' + str(parts.msg_type))
+
         handle: asyncio.Handle = self.waiting_for_acks.pop(parts.msg_id, None)
         logger.debug(f"Looked up call_later handle for {parts.msg_id}: {handle}")
         if handle:
@@ -505,10 +511,6 @@ class Søcket:
                     )
                     return
 
-                if identity:
-                    logger.debug(
-                        f"Scheduling the resend to identity:{identity.hex()} for data {original_data}"
-                    )
                 self._tasks.add(
                     self.loop.create_task(self.send(original_data, identity))
                 )
@@ -670,9 +672,8 @@ class Søcket:
                 logger.exception(f"Unexpected error when sending a message: {e}")
 
     def check_socket_type(self):
-        assert (
-            self.socket_type is None
-        ), f"Socket type has already been set: {self.socket_type}"
+        if self.socket_type is not None:  # pragma: no cover
+            raise SystemError(f"Socket type already set: {self.socket_type}")
 
     async def __aenter__(self) -> "Søcket":
         return self
@@ -710,17 +711,22 @@ class Connection:
         self.heartbeat_message = b"aiomsg-heartbeat"
 
     def warn_dropping_data(self):  # pragma: no cover
-        if self.writer_queue.qsize():
+        qsize = self.writer_queue.qsize()
+        if qsize:
             logger.warning(
-                f"Closing connection {self.identity.hex()} but there is"
-                f"still data in the writer queue: {self.writer_queue.qsize()}\n"
+                f"Closing connection {self.identity.hex()} but there is "
+                f"still data in the writer queue: {qsize}. "
                 f"These messages will be lost."
             )
 
     async def close(self):
-        self.warn_dropping_data()
         # Kill the reader task
         self.reader_task.cancel()
+        try:
+            await asyncio.wait_for(self.writer_queue.join(), 10.0)
+        except asyncio.TimeoutError:
+            self.warn_dropping_data()
+
         self.writer_task.cancel()
         await asyncio.gather(self.reader_task, self.writer_task)
         self.reader_task = None

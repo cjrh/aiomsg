@@ -2,7 +2,6 @@ import asyncio
 import logging
 import argparse
 import ssl
-import sys
 
 from aiomsg import Søcket, SendMode, DeliveryGuarantee
 
@@ -51,7 +50,4 @@ args = parser.parse_args()
 logging.basicConfig(level="DEBUG" if args.debug else "INFO")
 logger.info("Running main...")
 
-if sys.version_info >= (3, 7):
-    asyncio.run(main(args))
-else:
-    asyncio.get_event_loop().run_until_complete(main(args))
+asyncio.run(main(args))
