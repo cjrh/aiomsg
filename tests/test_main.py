@@ -457,8 +457,6 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
             except asyncio.CancelledError:
                 pass
 
-        trecv = loop.create_task(client_recv())
-
         async def client_send():
             """This function drives everything, and sets the termination
             future."""
@@ -476,8 +474,10 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
             trecv.cancel()
             server_task.cancel()
 
+        trecv = loop.create_task(client_recv())
         tsend = loop.create_task(client_send())
-        loop.run_until_complete(tsend)
+        run(tsend, 30)
+        # loop.run_until_complete(tsend)
 
     print(received)
     print(sent)
