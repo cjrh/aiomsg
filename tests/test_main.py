@@ -471,17 +471,13 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                 sent.append(value)
                 await asyncio.sleep(uniform(0, 0.1))
 
-            # Should be long enough to let the server volley all outstanding
-            # messages back to us.
-            # await asyncio.sleep(10.0)
             await f
             trecv.cancel()
             server_task.cancel()
 
         trecv = loop.create_task(client_recv())
         tsend = loop.create_task(client_send())
-        run(tsend, 90)
-        # loop.run_until_complete(tsend)
+        run(tsend, 120)
 
     print(received)
     print(sent)
