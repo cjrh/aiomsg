@@ -359,12 +359,12 @@ class Søcket:
             self.server.close()
             await self.server.wait_closed()
 
-        self.sender_task.cancel()
-        await self.sender_task
-
         await asyncio.gather(
             *(c.close() for c in self._connections.values()), return_exceptions=True
         )
+
+        self.sender_task.cancel()
+        await self.sender_task
 
         for task in self._tasks:
             task.cancel()
@@ -719,9 +719,13 @@ class Connection:
             )
 
     async def close(self):
-        self.warn_dropping_data()
         # Kill the reader task
         self.reader_task.cancel()
+        try:
+            await asyncio.wait_for(self.writer_queue.join(), 10.0)
+        except asyncio.TimeoutError:
+            self.warn_dropping_data()
+
         self.writer_task.cancel()
         await asyncio.gather(self.reader_task, self.writer_task)
         self.reader_task = None
