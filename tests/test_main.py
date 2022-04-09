@@ -521,8 +521,9 @@ def test_connection(loop):
             # await s.wait_closed()
             await asyncio.sleep(1000)
         except asyncio.CancelledError:
-            cb_task.cancel()
-            await cb_task
+            if cb_task:
+                cb_task.cancel()
+                await cb_task
         finally:
             if s:
                 s.close()
