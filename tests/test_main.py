@@ -492,7 +492,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     # we'll just try to keep an eye on it to make sure this doesn't
     # suddenly get worse for whatever reason.
     didnt_make_it = set(sent) - set(received)
-    print(f'{didnt_make_it=}')
+    print('didnt_make_it=', didnt_make_it)
     assert len(didnt_make_it) < 3
 
 
