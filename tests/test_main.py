@@ -447,6 +447,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                 await asyncio.sleep(uniform(0, 1))
 
         server_task = loop.create_task(intermittent_server())
+        f = asyncio.Future()
 
         async def client_recv():
             try:
@@ -454,6 +455,8 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
                     message = await sock_receiver(message_type, client)
                     logger.info(f"CLIENT GOT: {message}")
                     received.append(message)
+                    if len(received) == 100:
+                        f.set_result(True)
             except asyncio.CancelledError:
                 pass
 
@@ -470,7 +473,8 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
 
             # Should be long enough to let the server volley all outstanding
             # messages back to us.
-            await asyncio.sleep(10.0)
+            # await asyncio.sleep(10.0)
+            await f
             trecv.cancel()
             server_task.cancel()
 
@@ -488,7 +492,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     # we'll just try to keep an eye on it to make sure this doesn't
     # suddenly get worse for whatever reason.
     didnt_make_it = set(sent) - set(received)
-    print(didnt_make_it)
+    print(f'{didnt_make_it=}')
     assert len(didnt_make_it) < 3
 
 
