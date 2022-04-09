@@ -349,21 +349,21 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     3. We compare the list of what the client originally sent, and what
        it got back.
 
-    The server is continually killed and restart  at random times
+    The server is continually killed (hard) and restarted at random times
     throughout the test. This makes it quite hard to guarantee delivery,
-    this is why the test is cruel.
+    and is why the test is cruel.
 
     Under these conditions, the messages have to both make it to the
     server successfully AND back from the server to the client.
 
-    Internally, aiomsg is actually doing receipt
-    acknowledgement. When the client sends a message to the server,
-    it waits for a receipt. (the application-facing code, what you see
-    below, is not aware of these "receipt" messages). If the client
-    doesn't receive an acknowledgement within some timeframe, it pretty
-    much just sends the original message again.  That's the strategy.
+    Internally, aiomsg is actually doing receipt acknowledgement. When the
+    client sends a message to the server, it waits for a receipt. (the
+    application-facing code, what you see below, is not aware of these
+    "receipt" messages). If the client doesn't receive an acknowledgement
+    within some timeframe, it pretty much just sends the original message
+    again.  That's the strategy.
 
-    There is a race though; the client can successfully give a message
+    There is a race though: the client can successfully give a message
     to the server, AND receive a valid acknowledgement, but the server
     could fail to send the message back to the client. That's just an
     unfortunate side-effect of how the test was constructed below.
@@ -406,6 +406,9 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
         echo_server_path = pathlib.Path(__file__).parent / "echo_server.py"
 
         async def intermittent_server():
+            """This server will actually run in a separate sub-process so
+            that we can kill it in the same way a real production system
+            might be affected by e.g. a system reset and similar."""
             logger.info("Starting intermittent server")
             while True:
                 logger.info("Creating new subprocess")
