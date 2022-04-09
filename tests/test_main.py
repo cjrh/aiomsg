@@ -569,6 +569,8 @@ def test_connection(loop):
 def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled):
     """One server, one client, echo server"""
 
+    MESSAGE_COUNT = 10
+
     ctx_bind, ctx_connect = None, None
     if ssl_enabled:
         ctx_bind, ctx_connect, *_ = ssl_contexts
@@ -581,12 +583,10 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
     with bind_sock(send_mode=bind_send_mode, port=port, ssl_context=ctx_bind) as server:
 
         async def server_recv():
-            for i in range(10):
+            for i in range(MESSAGE_COUNT):
                 value = f"{i}".encode()
                 await sock_sender("bytes", server, value)
                 sent.append(value)
-            await asyncio.sleep(0.5)
-            fut.set_result(1)
 
         loop.create_task(server_recv())
 
@@ -598,7 +598,8 @@ def test_syntax(loop, bind_send_mode, conn_send_mode, ssl_contexts, ssl_enabled)
                 # 3. async for to get the received messages one by one.
                 async for msg in s.messages():
                     received.append(msg)
-                    print(f"Client received: {msg}")
+                    if len(received) == MESSAGE_COUNT:
+                        fut.set_result(1)
 
         t = loop.create_task(client_recv())
 
