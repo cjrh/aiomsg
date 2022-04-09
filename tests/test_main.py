@@ -480,7 +480,7 @@ def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
 
         trecv = loop.create_task(client_recv())
         tsend = loop.create_task(client_send())
-        run(tsend, 30)
+        run(tsend, 90)
         # loop.run_until_complete(tsend)
 
     print(received)
