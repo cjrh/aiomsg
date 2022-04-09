@@ -2,7 +2,6 @@ import asyncio
 import logging
 import argparse
 import ssl
-import sys
 
 from aiomsg import Søcket, SendMode, DeliveryGuarantee
 
