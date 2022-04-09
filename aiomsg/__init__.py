@@ -218,7 +218,7 @@ class Søcket:
                 logger.debug("Attempting to open connection")
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(
-                        hostname, port, loop=self.loop, ssl=ssl_context
+                        hostname, port, ssl=ssl_context
                     ),
                     timeout=connect_timeout,
                 )
