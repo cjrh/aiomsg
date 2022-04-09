@@ -440,7 +440,8 @@ class Søcket:
         # a little bookkeeping to remove the message id from the "waiting for
         # acks" dict, and as before, give the received data to the application.
         logger.debug(f"Got an REP: {parts}")
-        if parts.msg_type != "REP":  # Nothing else should be possible.
+        if parts.msg_type != "REP":  # pragma: no cover
+            # Nothing else should be possible.
             raise SystemError('Unexpected msg_type: ' + str(parts.msg_type))
 
         handle: asyncio.Handle = self.waiting_for_acks.pop(parts.msg_id, None)
@@ -510,10 +511,6 @@ class Søcket:
                     )
                     return
 
-                if identity:
-                    logger.debug(
-                        f"Scheduling the resend to identity:{identity.hex()} for data {original_data}"
-                    )
                 self._tasks.add(
                     self.loop.create_task(self.send(original_data, identity))
                 )
@@ -675,7 +672,7 @@ class Søcket:
                 logger.exception(f"Unexpected error when sending a message: {e}")
 
     def check_socket_type(self):
-        if self.socket_type is not None:
+        if self.socket_type is not None:  # pragma: no cover
             raise SystemError(f"Socket type already set: {self.socket_type}")
 
     async def __aenter__(self) -> "Søcket":
