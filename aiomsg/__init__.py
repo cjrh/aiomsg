@@ -375,9 +375,12 @@ class Søcket:
     async def close(self, timeout=10):
         try:
             await asyncio.wait_for(self._close(), timeout)
-            assert self.sender_task.done()
         except asyncio.TimeoutError:
             logger.exception("Timed out during close:")
+
+
+        if not self.sender_task.done():
+            logger.warning('sender_task was not complete.')
 
     def raw_recv(self, identity: bytes, message: bytes):
         """Called when *any* active connection receives a message."""
@@ -437,7 +440,9 @@ class Søcket:
         # a little bookkeeping to remove the message id from the "waiting for
         # acks" dict, and as before, give the received data to the application.
         logger.debug(f"Got an REP: {parts}")
-        assert parts.msg_type == "REP"  # Nothing else should be possible.
+        if parts.msg_type != "REP":  # Nothing else should be possible.
+            raise SystemError('Unexpected msg_type: ' + str(parts.msg_type))
+
         handle: asyncio.Handle = self.waiting_for_acks.pop(parts.msg_id, None)
         logger.debug(f"Looked up call_later handle for {parts.msg_id}: {handle}")
         if handle:
@@ -670,9 +675,8 @@ class Søcket:
                 logger.exception(f"Unexpected error when sending a message: {e}")
 
     def check_socket_type(self):
-        assert (
-            self.socket_type is None
-        ), f"Socket type has already been set: {self.socket_type}"
+        if self.socket_type is not None:
+            raise SystemError(f"Socket type already set: {self.socket_type}")
 
     async def __aenter__(self) -> "Søcket":
         return self
