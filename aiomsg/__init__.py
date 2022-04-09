@@ -710,10 +710,11 @@ class Connection:
         self.heartbeat_message = b"aiomsg-heartbeat"
 
     def warn_dropping_data(self):  # pragma: no cover
-        if self.writer_queue.qsize():
+        qsize = self.writer_queue.qsize()
+        if qsize:
             logger.warning(
-                f"Closing connection {self.identity.hex()} but there is"
-                f"still data in the writer queue: {self.writer_queue.qsize()}\n"
+                f"Closing connection {self.identity.hex()} but there is "
+                f"still data in the writer queue: {qsize}. "
                 f"These messages will be lost."
             )
 
