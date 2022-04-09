@@ -12,9 +12,9 @@ use aiomsg_types::{DeliveryGuarantee, Identity, Payload, SendMode};
 use futures::channel::mpsc;
 use futures::lock::Mutex;
 use futures::sink::SinkExt;
+use crate::utils::backoff_seq;
 // This makes "incoming.next()" available, although curiously,
 // the code runs without this import being required!
-use crate::utils::backoff_seq;
 use futures::stream::StreamExt;
 use log::{debug, error, info};
 use std::collections::BTreeMap;
@@ -197,7 +197,7 @@ impl Socket {
         hostname: T,
         port: u32,
         ssl_context: Option<u32>,
-    ) -> Result<()> {
+    ) {
         let hostname = hostname.into();
         // TODO: this should actually spawn a long-running task that will
         //  keep connecting every time the connection drops.
@@ -212,6 +212,7 @@ impl Socket {
         let mut backoff = backoff_seq(0.001, 5.0, 10);
 
         loop {
+            // TODO: make a way to close a connection
             if reconnecting {
                 sleep(backoff.next().unwrap()).await;
             }
@@ -235,7 +236,7 @@ impl Socket {
                         continue;
                     }
                 },
-                Err(e) => {
+                Err(_) => {
                     info!("Timed out connecting to {}", &addr);
                     continue;
                 }
@@ -248,20 +249,13 @@ impl Socket {
             match clone.connection_loop(stream).await {
                 Ok(_) => {
                     info!("Peer disconnected. Will try to reconnect.");
-                    continue;
                 }
                 Err(e) => {
                     info!("Got this error: {}", e);
-                    continue;
                 }
             };
-            // TODO: get rid of this, just a pause to make sure the connection
-            // is registered before "sends" can happen.
-            sleep(1).await;
-
-            // TODO: make a way to close a connection
+            continue;
         }
-        Ok(())
     }
 
     pub async fn accept_loop(self: Arc<Socket>, addr: String) -> io::Result<()> {

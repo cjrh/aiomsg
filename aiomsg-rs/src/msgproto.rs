@@ -1,12 +1,7 @@
 use async_std::io;
-// use async_std::net::{TcpListener, TcpStream};
-use async_std::io::{BufReader, Read};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
-use futures::io::{AsyncRead, AsyncWrite, ReadExact};
-// use futures::stream::Stream;
-use log::{error, info, trace, warn};
-use std::pin::Pin;
+use log::{trace, warn};
 
 const HEADER_SIZE: usize = 4;
 // TODO: change the i32
@@ -66,6 +61,7 @@ mod tests {
     use crate::test_utils;
     use std::sync::Arc;
     use std::time::Duration;
+    use log::{info, error, warn};
 
     use super::*;
     // use crate::test_utils::get_addr;

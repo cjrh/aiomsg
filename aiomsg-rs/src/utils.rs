@@ -39,7 +39,7 @@ pub fn backoff_seq<T: Into<f64>, U: Into<f64>>(
     let xn = end.into();
     let exp = 1f64 / (f64::from(n) - 1f64);
     let r = (xn / a).powf(exp);
-    let rng = (1..(n + 1));
+    let rng = 1..(n + 1);
     rng.map(move |nn| a * r.powi(nn - 1))
         .chain(std::iter::repeat(xn))
 }

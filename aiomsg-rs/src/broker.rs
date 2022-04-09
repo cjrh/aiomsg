@@ -4,11 +4,13 @@ use crate::utils::{hexify, stringify};
 use async_std::net::TcpStream;
 use async_std::{prelude::*, task};
 use futures::channel::mpsc;
+use futures::io::ErrorKind;
 use futures::lock::Mutex;
 use futures::sink::SinkExt;
 use futures::StreamExt;
 use log::{debug, error, info, trace, warn};
 use std::collections::hash_map::{Entry, HashMap};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 type Sender<T> = mpsc::UnboundedSender<T>;
@@ -38,6 +40,13 @@ pub async fn broker_loop(
     send_mode: SendMode,
 ) -> Result<()> {
     let mut peers: HashMap<Identity, Sender<Payload>> = HashMap::new();
+    // Messages for distribution to the set of peers, either pub or rr
+    // This is where messages are buffered for sending, if there are no valid
+    // destinations.
+    let mut pending: VecDeque<Payload> = VecDeque::new();
+    // Messages designated for a specific peer. These are kept in separate queues
+    // for each id.
+    let mut pending_id: HashMap<Identity, VecDeque<Payload>> = HashMap::new();
 
     while let Some(event) = events.next().await {
         trace!("Received event: {:?}", &event);
@@ -126,20 +135,16 @@ async fn connection_writer_loop(
         match msgproto::send_msg(stream, &msg).await {
             Ok(_) => trace!("Message sent"),
             Err(e) => {
-                info!("Got error: {}", &e);
+                if e.kind() == ErrorKind::BrokenPipe {
+                    info!("Cannot send, destination has gone away");
+                } else {
+                    info!("Got error: {}", &e);
+                }
                 // This *should* make the "read" end also disconnect, which will initiate
                 // reconnection. Check the code in the connector loop.
-                match stream.shutdown(std::net::Shutdown::Read) {
-                    Ok(()) => {
-                        trace!("Shutdown successful");
-                    }
-                    Err(e) => {
-                        error!(
-                            "Problem trying to shut down both sides of a connection: {}",
-                            &e
-                        );
-                        // return Err(Box::new(e));
-                    }
+                match stream.shutdown(std::net::Shutdown::Both) {
+                    Ok(()) => trace!("Shutdown successful"),
+                    Err(e) => error!("Error shutting down connection: {}", &e),
                 };
                 let mut broker = send_into_broker.lock().await;
                 broker.send(Event::RemovePeer { name: id }).await?;

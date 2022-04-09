@@ -3,17 +3,19 @@ Features:
 Basic features
 [ ] bind
 [X] connect
-[ ] trade identity
+[X] trade identity
 
 Extended feature (virtual socket)
 [ ] multiple bind
 [ ] multiple connect
 
 Reconnection
-[ ] reconnection if bind end drops
+[X] reconnection if bind end drops
 [ ] buffering for sends without destination available
+[ ] Shutdown waits for the send queue to drained (up to limit)
 [ ] buffer until limit, then back-pressure at `.send.await?` call site
-[ ] When trying to reconnect, backoff delay, with random jitter
+[ ] When trying to reconnect, backoff delay,
+[ ] Backoff with jitter
 
 Send: Distribution models
 [ ] mode: publish
