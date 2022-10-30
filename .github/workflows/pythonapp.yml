@@ -36,6 +36,7 @@ jobs:
     - name: Upload coverage
       env:
           COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # This will only work if we also send a "done" event after the
           # whole job is finished.
           # See: https://docs.coveralls.io/parallel-build-webhook
