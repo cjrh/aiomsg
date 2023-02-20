@@ -45,7 +45,7 @@ pytest==7.2.1
     #   -r requirements-test.in
     #   pytest-cov
     #   pytest-flake8
-pytest-cov==3.0.0
+pytest-cov==4.0.0
     # via -r requirements-test.in
 pytest-flake8==1.1.1
     # via -r requirements-test.in
