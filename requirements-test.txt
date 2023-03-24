@@ -40,7 +40,7 @@ pyflakes==2.4.0
     # via flake8
 pyparsing==3.0.7
     # via packaging
-pytest==7.2.1
+pytest==7.2.2
     # via
     #   -r requirements-test.in
     #   pytest-cov
