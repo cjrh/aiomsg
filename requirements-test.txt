@@ -47,7 +47,7 @@ pytest-cov==4.0.0
     # via -r requirements-test.in
 pytest-flake8==1.1.1
     # via -r requirements-test.in
-requests==2.27.1
+requests==2.31.0
     # via coveralls
 tomli==2.0.1
     # via coverage
