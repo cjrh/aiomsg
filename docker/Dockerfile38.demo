@@ -1,0 +1,17 @@
+FROM python:3.8-alpine3.10
+
+RUN apk add --update \
+    openssl \
+    gcc \
+    python-dev \
+    musl-dev \
+    linux-headers \
+    libffi-dev \
+    libressl-dev \
+    && rm -rf /var/cache/apk/*
+
+COPY . /aiomsg
+
+RUN pip install -e aiomsg[all]
+WORKDIR /aiomsg
+CMD ["python", "-m", "pytest", "--cov", "aiomsg", "--cov-report", "term-missing"]

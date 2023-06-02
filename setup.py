@@ -14,6 +14,7 @@ with open(path.join(here, "README.rst"), encoding="utf-8") as f:
 extras_require = {
     "dev": ["check-manifest", "colorama", "pygments", "twine", "wheel", "aiorun"],
     "test": ["pytest", "pytest-cov", "portpicker", "pytest-benchmark"],
+    "demo": ["aiohttp"],
     "doc": ["sphinx"],
 }
 extras_require["all"] = list(set().union(*extras_require.values()))
