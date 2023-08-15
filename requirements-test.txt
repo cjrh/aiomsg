@@ -28,7 +28,7 @@ packaging==21.3
     # via pytest
 pluggy==1.0.0
     # via pytest
-portpicker==1.5.2
+portpicker==1.6.0
     # via -r requirements-test.in
 psutil==5.9.0
     # via portpicker
