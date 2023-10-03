@@ -51,5 +51,5 @@ requests==2.31.0
     # via coveralls
 tomli==2.0.1
     # via coverage
-urllib3==1.26.9
+urllib3==1.26.17
     # via requests
