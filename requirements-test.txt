@@ -16,6 +16,8 @@ coveralls==3.3.1
     # via -r requirements-test.in
 docopt==0.6.2
     # via coveralls
+exceptiongroup==1.2.1
+    # via pytest
 flake8==4.0.1
     # via pytest-flake8
 idna==3.3
@@ -26,7 +28,7 @@ mccabe==0.6.1
     # via flake8
 packaging==21.3
     # via pytest
-pluggy==1.0.0
+pluggy==1.5.0
     # via pytest
 portpicker==1.6.0
     # via -r requirements-test.in
@@ -38,7 +40,7 @@ pyflakes==2.4.0
     # via flake8
 pyparsing==3.0.7
     # via packaging
-pytest==7.4.3
+pytest==8.1.1
     # via
     #   -r requirements-test.in
     #   pytest-cov
@@ -50,6 +52,8 @@ pytest-flake8==1.1.1
 requests==2.31.0
     # via coveralls
 tomli==2.0.1
-    # via coverage
+    # via
+    #   coverage
+    #   pytest
 urllib3==1.26.18
     # via requests
