@@ -12,7 +12,7 @@ coverage[toml]==6.3.2
     # via
     #   coveralls
     #   pytest-cov
-coveralls==3.3.1
+coveralls==4.0.0
     # via -r requirements-test.in
 docopt==0.6.2
     # via coveralls
@@ -52,5 +52,8 @@ pytest-flake8==1.1.1
 requests==2.31.0
     # via coveralls
 tomli==2.0.1
+    # via
+    #   coverage
+    #   pytest
 urllib3==1.26.18
     # via requests
