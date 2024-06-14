@@ -30,13 +30,6 @@ aiomsg
 
 Pure-Python smart sockets (like ZMQ) for simpler networking
 
-.. figure:: https://upload.wikimedia.org/wikipedia/commons/5/5e/NetworkDecentral.svg
-    :target: https://commons.wikimedia.org/wiki/File:NetworkDecentral.svg
-    :alt: Diagram of computers linked up in a network
-
-    :sub:`Attribution: And1mu [CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0)]`
-
-
 Table of Contents
 -----------------
 
@@ -45,6 +38,43 @@ Table of Contents
 
 Demo
 ====
+
+Put on your *Software Architect* hat, and imagine a microservices layout
+shown in this block diagram:
+
+.. figure:: https://raw.githubusercontent.com/cjrh/aiomsg/master/images/microservices.svg?sanitize=true
+    :alt: Layout of an example microservices architecture
+
+- One of more features are exposed to the world via the *load balancer*, **N**.
+  For example, this could be *nginx*.
+- Imagine the load balancer proxies HTTP requests through to your backend
+  webservers, **H**. Your webserver may well do some processing itself, but
+  imagine further that it needs information from other microservices to
+  service some requests.
+  - Both instances of **H** are identical, there are two of them for
+  redundancy.
+- One of these microservices is **A**. It's not important what it does, just
+  that it does "something".
+- It turns out that sometimes **A** needs information supplied by another
+  microservice, **B**. Both **A** and **B** need to do work so it's important
+  that they can both be scaled horizontally (ignore that "horizontal scaling"
+  would actually be in a vertical direction in the diagram!).
+
+The goal of **aiomsg** is to make it simple to construct these kinds of
+arrangements of microservices.
+
+We'll move through each of the services and look at their code:
+
+.. literalinclude:: examples/demo/h.py
+    :language: python3
+
+TODO: microservice A
+TODO: microservice P
+TODO: microservice B
+TODO: microservice M
+
+Simple Demo
+===========
 
 Let's make two microservices; one will send the current time to the other.
 Here's the end that binds to a port (a.k.a, the "server"):
@@ -934,7 +964,7 @@ These are the rules:
 
 #. **Every payload** in either direction shall be length-prefixed:
 
-   .. code-block::
+   .. code-block:: shell
 
         message = [4-bytes big endian int32][payload]
 
