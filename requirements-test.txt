@@ -47,7 +47,7 @@ pytest==7.4.3
     #   pytest-flake8
 pytest-cov==4.1.0
     # via -r requirements-test.in
-pytest-flake8==1.1.1
+pytest-flake8==1.2.0
     # via -r requirements-test.in
 requests==2.32.0
     # via coveralls
