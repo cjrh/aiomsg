@@ -18,13 +18,13 @@ docopt==0.6.2
     # via coveralls
 exceptiongroup==1.2.1
     # via pytest
-flake8==4.0.1
+flake8==5.0.4
     # via pytest-flake8
 idna==3.7
     # via requests
 iniconfig==1.1.1
     # via pytest
-mccabe==0.6.1
+mccabe==0.7.0
     # via flake8
 packaging==21.3
     # via pytest
@@ -34,9 +34,9 @@ portpicker==1.6.0
     # via -r requirements-test.in
 psutil==5.9.0
     # via portpicker
-pycodestyle==2.8.0
+pycodestyle==2.9.1
     # via flake8
-pyflakes==2.4.0
+pyflakes==2.5.0
     # via flake8
 pyparsing==3.0.7
     # via packaging
@@ -47,7 +47,7 @@ pytest==7.4.3
     #   pytest-flake8
 pytest-cov==4.1.0
     # via -r requirements-test.in
-pytest-flake8==1.1.1
+pytest-flake8==1.2.2
     # via -r requirements-test.in
 requests==2.32.0
     # via coveralls
