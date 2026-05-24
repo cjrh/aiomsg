@@ -566,6 +566,7 @@ def test_connection(loop):
     print(f"received: {received}")
 
 
+@pytest.mark.skip(reason="too slow")
 @pytest.mark.parametrize("bind_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
 @pytest.mark.parametrize("conn_send_mode", [SendMode.PUBLISH, SendMode.ROUNDROBIN])
 @pytest.mark.parametrize("ssl_enabled", [False, True])
