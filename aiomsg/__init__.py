@@ -60,7 +60,6 @@ from typing import (
 
 from aiomsg import header
 from . import msgproto
-from . import version_utils
 
 __all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
 
@@ -339,7 +338,8 @@ class Søcket:
             if connection.identity in self._connections:
                 del self._connections[connection.identity]
 
-            await version_utils.stream_close(writer)
+            writer.close()
+            await writer.wait_closed()
 
             if not self._connections:
                 logger.warning("No connections!")
