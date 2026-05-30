@@ -13,7 +13,7 @@ import ssl
 import logging
 
 import aiomsg
-from aiomsg import Søcket, SendMode
+from aiomsg import Søcket, SendMode, envelope
 import portpicker
 import pytest
 
@@ -539,8 +539,8 @@ def test_connection(loop):
 
     received = []
 
-    def recv_event(identity: bytes, data: bytes):
-        received.append((identity, data))
+    def recv_event(identity: bytes, env: envelope.Envelope):
+        received.append((identity, env.payload))
 
     async def client():
         reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
@@ -552,7 +552,10 @@ def test_connection(loop):
         cln_task = loop.create_task(c.run())
 
         for i in range(10):
-            await c.writer_queue.put(f"{i}".encode())
+            # The raw echo server bounces these back; sending them as DATA
+            # envelopes means the client's _recv decodes them and invokes
+            # recv_event, exercising the real receive path.
+            await c.writer_queue.put(envelope.data(f"{i}".encode()))
             await asyncio.sleep(0.1)
 
         cln_task.cancel()

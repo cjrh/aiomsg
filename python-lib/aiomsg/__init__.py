@@ -58,7 +58,7 @@ from typing import (
     Sequence,
 )
 
-from aiomsg import header
+from . import envelope
 from . import msgproto
 
 __all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
@@ -117,7 +117,6 @@ class Søcket:
         self,
         send_mode: SendMode = SendMode.ROUNDROBIN,
         delivery_guarantee: DeliveryGuarantee = DeliveryGuarantee.AT_MOST_ONCE,
-        receiver_channel: Optional[str] = None,
         identity: Optional[bytes] = None,
         loop=None,
         reconnection_delay: Callable[[], float] = lambda: 0.1,
@@ -142,7 +141,6 @@ class Søcket:
         self._tasks = WeakSet()
         self.send_mode = send_mode
         self.delivery_guarantee = delivery_guarantee
-        self.receiver_channel = receiver_channel
         self.identity = identity or uuid.uuid4().bytes
         self.loop = loop or asyncio.get_event_loop()
 
@@ -158,7 +156,9 @@ class Søcket:
         self.closed = False
         self.at_least_one_connection = asyncio.Event()
 
-        self.waiting_for_acks: Dict[uuid.UUID, asyncio.Handle] = {}
+        # Keyed by the 16-byte msg_id of an in-flight DATA_REQ; the handle is
+        # the scheduled resend, cancelled when the matching ACK arrives.
+        self.waiting_for_acks: Dict[bytes, asyncio.Handle] = {}
         self.reconnection_delay = reconnection_delay
 
         logger.debug("Starting the sender task.")
@@ -304,12 +304,24 @@ class Søcket:
         """Each new connection will create a task with this coroutine."""
         logger.debug("Creating new connection")
 
-        # Swap identities
+        # Handshake: both ends send a HELLO (version + identity) and read the
+        # peer's HELLO before any other traffic. See PROTOCOL.md §4.
         logger.debug(f"Sending my identity {self.idstr()}")
-        await msgproto.send_msg(writer, self.identity)
-        identity = await msgproto.read_msg(reader)
-        if not identity:
+        await msgproto.send_msg(writer, envelope.hello(self.identity))
+        hello_raw = await msgproto.read_msg(reader)
+        if not hello_raw:
             return
+
+        hello = envelope.decode(hello_raw)
+        if hello is None or hello.type is not envelope.MsgType.HELLO:
+            logger.error("Expected a HELLO handshake; closing connection.")
+            return
+        if hello.version != envelope.PROTOCOL_VERSION:
+            logger.error(
+                f"Unsupported protocol version {hello.version}; closing connection."
+            )
+            return
+        identity = hello.identity
 
         logger.debug(f"Received identity {identity.hex()}")
         if identity in self._connections:
@@ -398,75 +410,48 @@ class Søcket:
         if not self.sender_task.done():
             logger.warning('sender_task was not complete.')
 
-    def raw_recv(self, identity: bytes, message: bytes):
-        """Called when *any* active connection receives a message."""
-        logger.debug(f"In raw_recv, identity: {identity.hex()} message: {message}")
-        parts = header.parse_header(message)
-        logger.debug(f"{parts}")
-        if not parts.has_header:
-            # Simple case. No request-reply handling, just pass it onto the
-            # application as-is.
-            logger.debug(
-                f"Incoming message has no header, supply as-is: {message[:64]}"
-            )
-            self._queue_recv.put_nowait((identity, message))
+    def raw_recv(self, identity: bytes, env: envelope.Envelope):
+        """Called when *any* active connection receives a data envelope.
+
+        Connection-level frames (HELLO, HEARTBEAT) are handled inside
+        :class:`Connection`; only DATA, DATA_REQ and ACK reach here.
+        """
+        logger.debug(f"In raw_recv, identity: {identity.hex()} type: {env.type}")
+
+        if env.type is envelope.MsgType.DATA:
+            # Plain application message (AT_MOST_ONCE). Pass it on as-is.
+            self._queue_recv.put_nowait((identity, env.payload))
             return
 
-        ######################################################################
-        # The incoming message has a header.
-        #
-        # There are two cases. Let's deal with case 1 first: the received
-        # message is a NEW message (with a header). We must send a reply
-        # back, and pass on the received data to the application.
-        # There is a small catch. We must send the reply back to the
-        # specific connection that sent us this request. No biggie, we
-        # have a method for that.
-        if parts.msg_type == "REQ":
-            reply_parts = header.MessageParts(
-                msg_id=parts.msg_id, msg_type="REP", payload=b""
-            )
+        if env.type is envelope.MsgType.DATA_REQ:
+            # An AT_LEAST_ONCE message. Deliver the payload to the application
+            # and acknowledge receipt back to the sender on the same connection.
+            self._queue_recv.put_nowait((identity, env.payload))
 
-            # Make the received data available to the application.
-            logger.debug(f"Writing payload to app: {parts.payload}")
-            self._queue_recv.put_nowait((identity, parts.payload))
-            logger.debug("after self._queue_recv")
+            msg_id = env.msg_id
 
-            # Send acknowledgement of receipt back to the sender
+            def notify_ack():
+                logger.debug(f"Acknowledging DATA_REQ msg_id: {msg_id.hex()}")
+                # Specifying the identity routes the ACK to the exact connection
+                # the DATA_REQ arrived on.
+                self._user_send_queue.put_nowait((identity, envelope.ack(msg_id)))
 
-            def notify_rep():
-                logger.debug(f"Got an REQ, sending back an REP msg_id: {parts.msg_id}")
-                self._user_send_queue.put_nowait(
-                    # BECAUSE the identity is specified here, we are sure to
-                    # send the reply to the specific connection we got the REQ
-                    # from.
-                    (identity, header.make_message(reply_parts))
-                )
-
-            # By deferring this slightly, we hope that the parts.payload
-            # will be made available to the application before the REP is
-            # sent. Otherwise, there's a race condition where we send the
-            # REP *before* parts.payload has been given to the app, and the
-            # app shuts down before being able to do anything with
-            # parts.payload
-            self.loop.call_later(0.02, notify_rep)  # 20 ms
+            # Defer the ACK slightly so the payload is handed to the application
+            # before the sender learns it was received. Otherwise there is a
+            # race where the ACK arrives, the sender stops, and the receiver
+            # crashes before processing the payload — making the "guarantee"
+            # a lie. 20 ms is plenty.
+            self.loop.call_later(0.02, notify_ack)
             return
 
-        # Now we get to the second case. the message we're received here is
-        # a REPLY to a previously sent message. A good thing! All we do is
-        # a little bookkeeping to remove the message id from the "waiting for
-        # acks" dict, and as before, give the received data to the application.
-        logger.debug(f"Got an REP: {parts}")
-        if parts.msg_type != "REP":  # pragma: no cover
-            # Nothing else should be possible.
-            raise SystemError('Unexpected msg_type: ' + str(parts.msg_type))
-
-        handle: asyncio.Handle = self.waiting_for_acks.pop(parts.msg_id, None)
-        logger.debug(f"Looked up call_later handle for {parts.msg_id}: {handle}")
-        if handle:
-            logger.debug(f"Cancelling handle...")
-            handle.cancel()
-            # Nothing further to do. The REP does not go back to the application.
-        ######################################################################
+        if env.type is envelope.MsgType.ACK:
+            # Acknowledgement of one of our DATA_REQ sends: cancel the pending
+            # resend. ACKs are never surfaced to the application.
+            handle = self.waiting_for_acks.pop(env.msg_id, None)
+            logger.debug(f"ACK for {env.msg_id.hex()}, handle: {handle}")
+            if handle:
+                handle.cancel()
+            return
 
     async def recv_identity(self) -> Tuple[bytes, bytes]:
         # Some connection sent us some data
@@ -507,47 +492,40 @@ class Søcket:
 
     async def send(self, data: bytes, identity: Optional[bytes] = None, retries=None):
         logger.debug(f"Adding message to user queue: {data[:20]}")
-        original_data = data
         if (
             identity or self.send_mode is SendMode.ROUNDROBIN
         ) and self.delivery_guarantee is DeliveryGuarantee.AT_LEAST_ONCE:
-            # Enable receipt acknowledgement
+            # AT_LEAST_ONCE: send a DATA_REQ and schedule a resend that fires
+            # unless an ACK cancels it. (Not reachable for PUBLISH, which is
+            # intentionally unsupported — see PROTOCOL.md §6.)
             #####################################################################
-            parts = header.MessageParts(
-                msg_id=uuid.uuid4(), msg_type="REQ", payload=data
-            )
-            rich_data = header.make_message(parts)
-            # TODO: Might want to add a retry counter here somewhere, to keep
-            #  track of repeated failures to send a specific message.
+            msg_id = uuid.uuid4().bytes
+            wire = envelope.data_req(msg_id, data)
 
             def resend(retries):
                 if retries == 0:
-                    logger.info(
-                        f"No more retries to send. Dropping [{original_data[:20]}...]"
-                    )
+                    logger.info(f"No more retries to send. Dropping [{data[:20]}...]")
                     return
 
-                self._tasks.add(
-                    self.loop.create_task(self.send(original_data, identity))
-                )
+                self._tasks.add(self.loop.create_task(self.send(data, identity)))
                 # After deleting this here, a new one will be created when
                 # we re-enter ``async def send()``
                 logger.debug(f"Removing the acks entry")
-                del self.waiting_for_acks[parts.msg_id]
+                del self.waiting_for_acks[msg_id]
 
             handle: asyncio.Handle = self.loop.call_later(
                 5.0, resend, 5 if retries is None else retries - 1
             )
             # In self.raw_recv(), this handle will be cancelled if the other
-            # side sends back an acknowledgement of receipt (REP)
+            # side sends back an acknowledgement of receipt (ACK).
             logger.debug("Creating future resend acks entry")
-            self.waiting_for_acks[parts.msg_id] = handle
-            data = rich_data  # In the send further down, send the rich one.
+            self.waiting_for_acks[msg_id] = handle
             #####################################################################
         else:
-            pass
+            # AT_MOST_ONCE: a plain DATA envelope, no acknowledgement.
+            wire = envelope.data(data)
 
-        await self._user_send_queue.put((identity, data))
+        await self._user_send_queue.put((identity, wire))
 
     async def send_string(self, data: str, identity: Optional[bytes] = None, **kwargs):
         """Automatically convert the string to bytes when sending.
@@ -708,7 +686,7 @@ class Connection:
         identity: bytes,
         reader: StreamReader,
         writer: StreamWriter,
-        recv_event: Callable[[bytes, bytes], None],
+        recv_event: Callable[[bytes, "envelope.Envelope"], None],
         loop=None,
         writer_queue_maxsize=0,
     ):
@@ -724,7 +702,7 @@ class Connection:
 
         self.heartbeat_interval = 5
         self.heartbeat_timeout = 15
-        self.heartbeat_message = b"aiomsg-heartbeat"
+        self.heartbeat_message = envelope.heartbeat()
 
     def warn_dropping_data(self):  # pragma: no cover
         qsize = self.writer_queue.qsize()
@@ -769,15 +747,21 @@ class Connection:
                 self.writer_queue.put_nowait(None)
                 return
 
-            if message == self.heartbeat_message:
+            env = envelope.decode(message)
+            if env is None:
+                # Unrecognised envelope type; ignore it (forward-compat).
+                logger.debug("Ignoring unrecognised envelope")
+                continue
+
+            if env.type is envelope.MsgType.HEARTBEAT:
                 logger.debug("Heartbeat received")
                 continue
 
             try:
                 logger.debug(
-                    f"Received message on connection {self.identity.hex()}: {message}"
+                    f"Received {env.type.name} on connection {self.identity.hex()}"
                 )
-                self.reader_event(self.identity, message)
+                self.reader_event(self.identity, env)
             except asyncio.QueueFull:
                 logger.error(
                     # TODO: fix message
