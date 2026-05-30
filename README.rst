@@ -58,7 +58,7 @@ Directory         Implementation                                      Status
 ``python-lib/``   Python, asyncio (the reference implementation)      available
 ``rust-lib-async/`` Rust, async (tokio)                               available
 ``rust-lib-sync/``  Rust, synchronous (threads)                       planned
-``golang-lib/``   Go, goroutines + channels                           planned
+``golang-lib/``   Go, goroutines + channels                           available
 ================  ==================================================  ==========
 
 The canonical, language-independent wire specification lives in

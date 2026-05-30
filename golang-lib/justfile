@@ -1,0 +1,26 @@
+# Dev operations for the Go implementation of aiomsg.
+# Run `just` (or `just --list`) to see available recipes.
+
+# Show available recipes.
+default:
+    @just --list
+
+# Run the test suite.
+test:
+    go test ./...
+
+# Build everything (library, examples, conformance agent).
+build:
+    go build ./...
+
+# Vet for suspicious constructs.
+lint:
+    go vet ./...
+
+# Check formatting.
+fmt-check:
+    test -z "$(gofmt -l .)"
+
+# Auto-format.
+fmt:
+    gofmt -w .

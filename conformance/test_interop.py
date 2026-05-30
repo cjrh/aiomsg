@@ -22,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_LIB = REPO_ROOT / "python-lib"
 RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
+GOLANG_DIR = REPO_ROOT / "golang-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
 
 COUNT = 10
@@ -41,6 +42,14 @@ SCENARIOS = [
     # AT_LEAST_ONCE exercises DATA_REQ/ACK interop in both directions.
     ("rust", "connect", "python", "bind", "roundrobin", "at-least-once"),
     ("python", "connect", "rust", "bind", "roundrobin", "at-least-once"),
+    # Go interop with both Python and Rust.
+    ("go", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "go", "connect", "roundrobin", "at-most-once"),
+    ("go", "connect", "rust", "bind", "roundrobin", "at-most-once"),
+    ("rust", "bind", "go", "connect", "publish", "at-most-once"),
+    ("go", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    ("python", "connect", "go", "bind", "roundrobin", "at-least-once"),
+    ("go", "connect", "rust", "bind", "roundrobin", "at-least-once"),
 ]
 
 
@@ -52,7 +61,7 @@ def _scenario_id(s):
 @pytest.fixture(scope="session")
 def rust_agent_exe():
     """Build the Rust conformance agent once and return its binary path."""
-    if not _have_cargo():
+    if not _have("cargo"):
         pytest.skip("cargo not available")
     proc = subprocess.run(
         ["cargo", "build", "--example", "conformance_agent", "--message-format=json"],
@@ -79,10 +88,33 @@ def rust_agent_exe():
     return exe
 
 
-def _have_cargo():
+@pytest.fixture(scope="session")
+def go_agent_exe(tmp_path_factory):
+    """Build the Go conformance agent once and return its binary path."""
+    if not _have("go"):
+        pytest.skip("go not available")
+    out = tmp_path_factory.mktemp("go-agent") / "conformance_agent"
+    proc = subprocess.run(
+        ["go", "build", "-o", str(out), "./cmd/conformance_agent"],
+        cwd=GOLANG_DIR,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        pytest.fail(f"failed to build go agent:\n{proc.stderr}")
+    return str(out)
+
+
+@pytest.fixture(scope="session")
+def agents(rust_agent_exe, go_agent_exe):
+    """Built native-agent binaries, keyed by language."""
+    return {"rust": rust_agent_exe, "go": go_agent_exe}
+
+
+def _have(name):
     from shutil import which
 
-    return which("cargo") is not None
+    return which(name) is not None
 
 
 def _free_port():
@@ -91,7 +123,7 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _agent_cmd(lang, rust_exe, *, role, behavior, port, send_mode, delivery):
+def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery):
     flags = [
         "--role", role,
         "--host", "127.0.0.1",
@@ -105,7 +137,7 @@ def _agent_cmd(lang, rust_exe, *, role, behavior, port, send_mode, delivery):
     ]
     if lang == "python":
         return [sys.executable, str(PY_AGENT), *flags], _python_env()
-    return [rust_exe, *flags], None
+    return [exes[lang], *flags], None
 
 
 def _python_env():
@@ -124,17 +156,17 @@ def _launch(cmd_env):
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=[_scenario_id(s) for s in SCENARIOS])
-def test_interop(rust_agent_exe, scenario):
+def test_interop(agents, scenario):
     src_lang, src_role, sink_lang, sink_role, send_mode, delivery = scenario
     port = _free_port()
 
     source_cmd = _agent_cmd(
-        src_lang, rust_agent_exe,
+        src_lang, agents,
         role=src_role, behavior="source", port=port,
         send_mode=send_mode, delivery=delivery,
     )
     sink_cmd = _agent_cmd(
-        sink_lang, rust_agent_exe,
+        sink_lang, agents,
         role=sink_role, behavior="sink", port=port,
         send_mode=send_mode, delivery=delivery,
     )
