@@ -1,0 +1,24 @@
+[package]
+name = "aiomsg"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Native async (tokio) implementation of the aiomsg smart-socket protocol"
+license = "Apache-2.0"
+repository = "https://github.com/cjrh/aiomsg"
+readme = "README.md"
+keywords = ["asyncio", "socket", "network", "messaging", "tokio"]
+categories = ["network-programming", "asynchronous"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros"] }
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+async-stream = "0.3"
+tokio-stream = "0.1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros", "test-util"] }
+tokio-stream = "0.1"
