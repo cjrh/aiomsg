@@ -22,6 +22,10 @@ test-rust-sync:
 test-golang:
     cd golang-lib && just test
 
+# Run the cross-language conformance (interop) suite.
+test-conformance:
+    uv run --project python-lib --group test pytest conformance/ -v
+
 # Run every implementation's test suite that currently exists.
 test-all:
     #!/usr/bin/env bash
