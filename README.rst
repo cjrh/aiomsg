@@ -56,7 +56,7 @@ subdirectory:
 Directory         Implementation                                      Status
 ================  ==================================================  ==========
 ``python-lib/``   Python, asyncio (the reference implementation)      available
-``rust-lib-async/`` Rust, async (tokio)                               planned
+``rust-lib-async/`` Rust, async (tokio)                               available
 ``rust-lib-sync/``  Rust, synchronous (threads)                       planned
 ``golang-lib/``   Go, goroutines + channels                           planned
 ================  ==================================================  ==========

@@ -344,17 +344,20 @@ runner.
 
 ## 9. Roadmap (phased)
 
-| Phase | Deliverable | Exit criterion |
-|---|---|---|
-| **0. Plan** | This `DESIGN.md` | Approved by you |
-| **1. Protocol spec** | `PROTOCOL.md` extracted + finalized from §5 | Reviewed; ambiguity resolved |
-| **2. Python relocation** | Python under `python-lib/`, CI green | Existing tests pass unchanged |
-| **3. Python → v1 wire** | Typed-envelope change applied to Python ref | Tests pass against new format |
-| **4. Rust async** | `rust-lib-async` implementing full spec | Unit + integration tests pass |
-| **5. Conformance harness** | `conformance/` runner + Rust↔Python scenarios | Rust-async interoperates with Python |
-| **6. Rust sync** | `rust-lib-sync` (+ optional `rust-lib-core`) | Conformance scenarios pass |
-| **7. Go** | `golang-lib` | Conformance scenarios pass |
-| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published |
+| Phase | Deliverable | Exit criterion | Status |
+|---|---|---|---|
+| **0. Plan** | This `DESIGN.md` | Approved by you | ✅ done |
+| **1. Protocol spec** | `PROTOCOL.md` extracted + finalized from §5 | Reviewed; ambiguity resolved | ✅ done |
+| **2. Python relocation** | Python under `python-lib/`, CI green | Existing tests pass unchanged | ✅ done |
+| **3. Python → v1 wire** | Typed-envelope change applied to Python ref | Tests pass against new format | ✅ done |
+| **4. Rust async** | `rust-lib-async` implementing full spec | Unit + integration tests pass | ✅ done |
+| **5. Conformance harness** | `conformance/` runner + Rust↔Python scenarios | Rust-async interoperates with Python | ✅ done |
+| **6. Rust sync** | `rust-lib-sync` (independent crate) | Conformance scenarios pass | ⏳ next |
+| **7. Go** | `golang-lib` | Conformance scenarios pass | ⏳ |
+| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published | ⏳ |
+
+TLS is a cross-cutting follow-up within phases 4/6/7 (the protocol is identical
+with or without it); `rust-lib-async` currently runs plain TCP.
 
 Phases 4→7 each follow the same internal rhythm: framing/parsing → handshake +
 heartbeat → multiplex + send modes → reconnect + buffering → delivery guarantee
