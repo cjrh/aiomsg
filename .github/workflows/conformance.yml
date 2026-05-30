@@ -1,0 +1,40 @@
+name: Conformance
+
+# Cross-language interop: builds each implementation's test agent and asserts
+# they speak the one wire protocol. Runs when any implementation or the
+# conformance harness itself changes.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'python-lib/**'
+      - 'rust-lib-async/**'
+      - 'rust-lib-sync/**'
+      - 'golang-lib/**'
+      - 'conformance/**'
+      - '.github/workflows/conformance.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'python-lib/**'
+      - 'rust-lib-async/**'
+      - 'rust-lib-sync/**'
+      - 'golang-lib/**'
+      - 'conformance/**'
+      - '.github/workflows/conformance.yml'
+
+jobs:
+  interop:
+    name: Cross-language interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Run conformance suite
+        run: uv run --project python-lib --group test pytest conformance/ -v
