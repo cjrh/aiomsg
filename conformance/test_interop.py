@@ -22,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_LIB = REPO_ROOT / "python-lib"
 RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
+RUST_SYNC_DIR = REPO_ROOT / "rust-lib-sync"
 GOLANG_DIR = REPO_ROOT / "golang-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
 
@@ -50,6 +51,12 @@ SCENARIOS = [
     ("go", "connect", "python", "bind", "roundrobin", "at-least-once"),
     ("python", "connect", "go", "bind", "roundrobin", "at-least-once"),
     ("go", "connect", "rust", "bind", "roundrobin", "at-least-once"),
+    # Synchronous Rust interop with every other implementation.
+    ("rust-sync", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "rust-sync", "connect", "roundrobin", "at-most-once"),
+    ("rust-sync", "connect", "rust", "bind", "roundrobin", "at-most-once"),
+    ("go", "bind", "rust-sync", "connect", "publish", "at-most-once"),
+    ("rust-sync", "connect", "python", "bind", "roundrobin", "at-least-once"),
 ]
 
 
@@ -58,19 +65,18 @@ def _scenario_id(s):
     return f"{src_lang}-{src_role}-source__{sink_lang}-{sink_role}-sink__{mode}__{delivery}"
 
 
-@pytest.fixture(scope="session")
-def rust_agent_exe():
-    """Build the Rust conformance agent once and return its binary path."""
+def _build_cargo_example(crate_dir):
+    """Build a crate's conformance_agent example and return its binary path."""
     if not _have("cargo"):
         pytest.skip("cargo not available")
     proc = subprocess.run(
         ["cargo", "build", "--example", "conformance_agent", "--message-format=json"],
-        cwd=RUST_ASYNC_DIR,
+        cwd=crate_dir,
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        pytest.fail(f"failed to build rust agent:\n{proc.stderr}")
+        pytest.fail(f"failed to build rust agent in {crate_dir}:\n{proc.stderr}")
 
     exe = None
     for line in proc.stdout.splitlines():
@@ -84,8 +90,18 @@ def rust_agent_exe():
             and msg.get("target", {}).get("name") == "conformance_agent"
         ):
             exe = msg["executable"]
-    assert exe, "could not locate built conformance_agent binary"
+    assert exe, f"could not locate built conformance_agent binary in {crate_dir}"
     return exe
+
+
+@pytest.fixture(scope="session")
+def rust_agent_exe():
+    return _build_cargo_example(RUST_ASYNC_DIR)
+
+
+@pytest.fixture(scope="session")
+def rust_sync_agent_exe():
+    return _build_cargo_example(RUST_SYNC_DIR)
 
 
 @pytest.fixture(scope="session")
@@ -106,9 +122,13 @@ def go_agent_exe(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def agents(rust_agent_exe, go_agent_exe):
+def agents(rust_agent_exe, rust_sync_agent_exe, go_agent_exe):
     """Built native-agent binaries, keyed by language."""
-    return {"rust": rust_agent_exe, "go": go_agent_exe}
+    return {
+        "rust": rust_agent_exe,
+        "rust-sync": rust_sync_agent_exe,
+        "go": go_agent_exe,
+    }
 
 
 def _have(name):

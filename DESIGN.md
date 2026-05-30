@@ -352,9 +352,9 @@ runner.
 | **3. Python → v1 wire** | Typed-envelope change applied to Python ref | Tests pass against new format | ✅ done |
 | **4. Rust async** | `rust-lib-async` implementing full spec | Unit + integration tests pass | ✅ done |
 | **5. Conformance harness** | `conformance/` runner + Rust↔Python scenarios | Rust-async interoperates with Python | ✅ done |
-| **6. Rust sync** | `rust-lib-sync` (independent crate) | Conformance scenarios pass | ⏳ next |
+| **6. Rust sync** | `rust-lib-sync` (independent crate) | Conformance scenarios pass | ✅ done |
 | **7. Go** | `golang-lib` | Conformance scenarios pass | ✅ done |
-| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published | ⏳ |
+| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published | ◑ TLS + publishing remain |
 
 TLS is a cross-cutting follow-up within phases 4/6/7 (the protocol is identical
 with or without it); `rust-lib-async` currently runs plain TCP.

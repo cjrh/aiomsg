@@ -1,0 +1,20 @@
+[package]
+name = "aiomsg-sync"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Native synchronous (threaded) implementation of the aiomsg smart-socket protocol"
+license = "Apache-2.0"
+repository = "https://github.com/cjrh/aiomsg"
+readme = "README.md"
+keywords = ["socket", "network", "messaging", "threads", "blocking"]
+categories = ["network-programming"]
+
+[lib]
+name = "aiomsg"
+path = "src/lib.rs"
+
+[dependencies]
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
