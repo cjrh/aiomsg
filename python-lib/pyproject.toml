@@ -6,7 +6,7 @@ build-backend = "uv_build"
 name = "aiomsg"
 version = "2019.12.3"
 description = "Socket-based abstraction for messaging patterns"
-readme = "README.rst"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

@@ -18,10 +18,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Build sdist and wheel
         run: uv build
+        working-directory: python-lib
       - uses: actions/upload-artifact@v7
         with:
           name: dist
-          path: dist/
+          path: python-lib/dist/
 
   publish:
     name: Publish to PyPI

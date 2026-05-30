@@ -1,12 +1,22 @@
-name: Python application
+name: Python CI
 
 on:
   push:
     branches:
       - master
+    paths:
+      - 'python-lib/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - master
+    paths:
+      - 'python-lib/**'
+      - '.github/workflows/ci.yml'
+
+defaults:
+  run:
+    working-directory: python-lib
 
 jobs:
   build:
@@ -33,7 +43,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: coverallsapp/github-action@v2
         with:
-          file: coverage.lcov
+          file: python-lib/coverage.lcov
           flag-name: py-${{ matrix.python-version }}
           parallel: true
 
