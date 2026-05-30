@@ -151,6 +151,9 @@ class Søcket:
         self._user_send_queue = asyncio.Queue()
 
         self.server = None
+        # Long-running task created by ``connect()`` that keeps (re)connecting
+        # for the life of the socket. Tracked so ``close()`` can cancel it.
+        self.connect_task: Optional[asyncio.Task] = None
         self.socket_type: Optional[ConnectionEnd] = None
         self.closed = False
         self.at_least_one_connection = asyncio.Event()
@@ -252,7 +255,7 @@ class Søcket:
                 except Exception:
                     logger.exception("Unexpected error")
 
-        self.loop.create_task(connect_with_retry())
+        self.connect_task = self.loop.create_task(connect_with_retry())
         return self
 
     async def messages(self) -> AsyncGenerator[bytes, None]:
@@ -357,11 +360,24 @@ class Søcket:
         if self.server:
             # Stop new connections from being accepted.
             self.server.close()
-            await self.server.wait_closed()
 
+        # Close all active connections *before* awaiting
+        # ``server.wait_closed()``. From Python 3.13, ``wait_closed()`` only
+        # returns once every active connection has also closed; if we waited
+        # first, a still-connected peer would block close() until its timeout.
         await asyncio.gather(
             *(c.close() for c in self._connections.values()), return_exceptions=True
         )
+
+        if self.server:
+            await self.server.wait_closed()
+
+        # Stop the reconnection loop (no-op for bind-only sockets). By now any
+        # live connection has been closed above, so the task is either between
+        # retries or about to observe ``self.closed``; cancelling joins it.
+        if self.connect_task:
+            self.connect_task.cancel()
+            await asyncio.gather(self.connect_task, return_exceptions=True)
 
         self.sender_task.cancel()
         await self.sender_task
