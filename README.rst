@@ -43,6 +43,35 @@ Table of Contents
 .. contents::
 
 
+Implementations
+===============
+
+``aiomsg`` is a *family* of native implementations of one shared wire
+protocol. A socket written in any of these languages interoperates on the wire
+with a socket written in any other. Each implementation is idiomatic to its
+language (no C bindings, no FFI wrappers), and each lives in its own
+subdirectory:
+
+================  ==================================================  ==========
+Directory         Implementation                                      Status
+================  ==================================================  ==========
+``python-lib/``   Python, asyncio (the reference implementation)      available
+``rust-lib-async/`` Rust, async (tokio)                               planned
+``rust-lib-sync/``  Rust, synchronous (threads)                       planned
+``golang-lib/``   Go, goroutines + channels                           planned
+================  ==================================================  ==========
+
+The canonical, language-independent wire specification lives in
+`PROTOCOL.md <PROTOCOL.md>`_. The overall plan and per-language design notes are
+in `DESIGN.md <DESIGN.md>`_.
+
+The code examples throughout this document are in Python (the reference), but
+the design principles, message-distribution patterns, and developer experience
+described below are shared by every implementation — only the spelling differs
+(async/await in Python and Rust-async; goroutines and channels in Go; blocking
+calls in Rust-sync).
+
+
 Demo
 ====
 
@@ -919,90 +948,36 @@ could be like.
 I want to talk to the aiomsg Søcket with a different programming language
 -------------------------------------------------------------------------
 
-**WARNING: This section is extremely provisional. I haven't fully
-nailed down the protocol yet.**
+You don't have to reverse-engineer anything: the complete, language-independent
+wire protocol is specified in `PROTOCOL.md <PROTOCOL.md>`_. It is deliberately
+tiny — length-prefixed frames carrying a small typed envelope
+(``HELLO``, ``HEARTBEAT``, ``DATA``, ``DATA_REQ``, ``ACK``) — so reimplementing
+it in a new language is straightforward. Anything written to that spec will
+interoperate with every existing implementation.
 
-To make a clone of the ``Søcket`` in another language is probably a
-lot of work, but it's actually not necessary to implement everything.
-
-You can talk to ``aiomsg`` sockets quite easily by implementing the
-simple protocol described below. It would be just like regular
-socket programming in your programming language. You just have to
-follow a few simple rules for the communication protocol.
-
-These are the rules:
-
-#. **Every payload** in either direction shall be length-prefixed:
-
-   .. code-block::
-
-        message = [4-bytes big endian int32][payload]
-
-#. **Immediately** after successfully opening a TCP connection, before doing
-   anything else with your socket, you shall:
-
-    - Send your identity, as a 16 byte unique identifier (a 16 byte UUID4
-      is perfect). Note that Rule 1 still applies, so this would look like
-
-      .. code-block::
-
-           identity_message = b'\x00\x00\x00\x10' + [16 bytes]
-
-      (because the payload length, 16, is ``0x10`` in hex)
-
-    - Receive the other peer's identity (16 bytes). Remember Rule 1 still
-      applies, so you'll actually receive 20 bytes, and the first four will
-      be the length of the payload, which will be 16 bytes for this message.
-
-#. You shall **periodically** send a heartbeat message ``b"aiomsg-heartbeat"``.
-   Every 5 seconds is good. If you receive such messages you can ignore them.
-   If you don't receive one (or an actual data message) within 15 seconds
-   of the previous receipt,
-   the connection is probably dead and you should kill it and/or reconnect.
-   Note that Rule 1 still applies, and because the length of this message
-   is also 16 bytes, the message is ironically similar to the identity
-   message:
-
-   .. code-block::
-
-        heartbeat_message = b'\x00\x00\x00\x10' + b'aiomsg-heartbeat'
-
-After you've satisfied these rules, from that point on every message
-sent or received is a Rule 1 message, i.e., length prefixed with 4 bytes
-for the length of the payload that follows.
-
-If you want to run a *bind* socket, and receive multiple connections from
-different ``aiomsg`` sockets, then the above rules apply to *each* separate
-connection.
-
-That's it!
-
-TODO: Discuss the protocol for ``AT_LEAST_ONCE`` mode, which is a bit messy
-at the moment.
+If the language you want already has an implementation (see `Implementations`_
+above), you don't need to implement anything at all — just use it.
 
 Developer setup
 ===============
 
-1. Setup::
+This repository hosts several language implementations, each in its own
+subdirectory with its own tooling. Every implementation exposes a uniform
+``just test`` recipe, and the top-level ``justfile`` dispatches to each.
+
+The Python reference implementation uses `uv <https://docs.astral.sh/uv/>`_ and
+`just <https://github.com/casey/just>`_::
 
     $ git clone https://github.com/cjrh/aiomsg
-    $ python -m venv venv
-    $ source venv/bin/activate  (or venv/Scripts/activate.bat on Windows)
-    $ pip install -e .[all]
+    $ cd aiomsg/python-lib
+    $ just sync     # create the venv with test + lint deps
+    $ just test     # run the test suite
+    $ just lint     # ruff check
 
-2. Run the tests::
+Releasing the Python package is documented in ``python-lib/RELEASING.md``;
+in short, ``just release patch`` (from ``python-lib/``) bumps the version,
+tags, and pushes, and a pushed ``v*`` tag triggers PyPI publishing via GitHub
+Actions.
 
-    $ pytest
-
-3. Create a new release::
-
-    $ bumpymcbumpface --push-git --push-pypi
-
-The easiest way to obtain the
-`bumpymcbumpface <https://pypi.org/project/bumpymcbumpface/>`_ tool is
-to install it with `pipx <https://github.com/pipxproject/pipx>`_. Once installed
-and on your ``$PATH``, the command above should work. **NOTE: twine must be
-correctly configured to upload to pypi.**  If you don't have rights to
-push to PyPI, but you do have rights to push to github, just omit
-the ``--push-pypi`` option in the command above. The command will
-automatically create the next git tag and push it.
+See each implementation's own ``README`` for language-specific developer
+instructions.
