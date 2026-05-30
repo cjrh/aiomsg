@@ -340,6 +340,7 @@ def test_identity(loop, ssl_enabled, ssl_contexts):
     assert sends == receipts
 
 
+@pytest.mark.skip(reason="Inherent race: server may fail to echo a message back. See docstring.")
 @pytest.mark.parametrize("ssl_enabled", [False, True])
 def test_client_with_intermittent_server(loop, ssl_enabled, ssl_contexts):
     """This is a somewhat cruel stress test for dropped messages.

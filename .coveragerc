@@ -1,4 +1,10 @@
 [run]
 branch = True
-include =
-    aiomsg/*
+source =
+    aiomsg
+    tests/
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if typing.TYPE_CHECKING:
