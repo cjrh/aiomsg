@@ -1,0 +1,41 @@
+[package]
+name = "aiomsg-sync-chan"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Experiment: threaded aiomsg with a per-connection epoll reactor (polling crate) + channels for zero-latency duplex TLS"
+license = "Apache-2.0"
+repository = "https://github.com/cjrh/aiomsg"
+readme = "README.md"
+keywords = ["socket", "network", "messaging", "threads", "blocking"]
+categories = ["network-programming"]
+
+[lib]
+name = "aiomsg"
+path = "src/lib.rs"
+
+[features]
+default = ["tls"]
+# Optional TLS via rustls (ring crypto backend, no OpenSSL / C toolchain).
+tls = ["dep:rustls"]
+
+[dependencies]
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+# Thin, sync-friendly epoll/kqueue/IOCP wrapper (no async runtime) for the
+# reactor. notify() wakes the loop when the broker queues an outbound message.
+polling = "3"
+# rustls with the pure-Rust `ring` provider only. rustls's default features pull
+# in aws-lc-rs, which needs cmake + a C compiler; we deliberately avoid that.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"], optional = true }
+
+[dev-dependencies]
+# Test/example helpers: generate self-signed certs and read PEM files. Pure Rust.
+rcgen = "0.13"
+rustls-pemfile = "2"
+
+# The TLS demo only builds when the `tls` feature is on.
+[[example]]
+name = "tls"
+required-features = ["tls"]
