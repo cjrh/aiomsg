@@ -39,7 +39,7 @@ subdirectory:
 Every implementation supports TLS, using its language's idiomatic facility
 (rustls with the pure-Rust `ring` backend for both Rust crates, `crypto/tls`
 for Go, the standard `ssl` module for Python, OpenSSL for C/C++/Zig, and JSSE
-for Java). TLS sockets interoperate across languages just as plain ones do — the
+for Java). TLS sockets interoperate across languages just as plain ones do. The
 cross-language conformance suite exercises both transports. See each
 implementation's README for the TLS API.
 
@@ -97,8 +97,8 @@ further down in rest of this document.
 Let's look at the same demo in the other language implementations:
 
 The wire protocol is identical, so any of these ends can talk to the Python
-ends above (and to each other). Each snippet is two complete programs — the
-bind end ("server") and the connect end ("client") — matching the runnable
+ends above (and to each other). Each snippet is two complete programs, the
+bind end ("server") and the connect end ("client"), matching the runnable
 `examples/` in each implementation.
 
 ## Rust-sync Demo
@@ -1074,13 +1074,13 @@ could be like.
 
 You don't have to reverse-engineer anything: the complete, language-independent
 wire protocol is specified in [PROTOCOL.md](PROTOCOL.md). It is deliberately
-tiny — length-prefixed frames carrying a small typed envelope
-(`HELLO`, `HEARTBEAT`, `DATA`, `DATA_REQ`, `ACK`) — so reimplementing
+tiny: length-prefixed frames carrying a small typed envelope
+(`HELLO`, `HEARTBEAT`, `DATA`, `DATA_REQ`, `ACK`), so reimplementing
 it in a new language is straightforward. Anything written to that spec will
 interoperate with every existing implementation.
 
 If the language you want already has an implementation (see [Implementations](#implementations)
-above), you don't need to implement anything at all — just use it.
+above), you don't need to implement anything at all, just use it.
 
 # Developer setup
 
