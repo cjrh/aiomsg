@@ -1,20 +1,3 @@
-[![image](https://github.com/cjrh/aiomsg/workflows/Python%20application/badge.svg)](https://github.com/cjrh/aiomsg/actions)
-
-[![image](https://img.shields.io/badge/stdlib--only-yes-green.svg)](https://img.shields.io/badge/stdlib--only-yes-green.svg)
-
-[![image](https://coveralls.io/repos/github/cjrh/aiomsg/badge.svg?branch=master)](https://coveralls.io/github/cjrh/aiomsg?branch=master)
-
-[![image](https://img.shields.io/pypi/pyversions/aiomsg.svg)](https://pypi.python.org/pypi/aiomsg)
-
-[![image](https://img.shields.io/github/tag/cjrh/aiomsg.svg)](https://img.shields.io/github/tag/cjrh/aiomsg.svg)
-
-[![image](https://img.shields.io/badge/install-pip%20install%20aiomsg-ff69b4.svg)](https://img.shields.io/badge/install-pip%20install%20aiomsg-ff69b4.svg)
-
-[![image](https://img.shields.io/pypi/v/aiomsg.svg)](https://img.shields.io/pypi/v/aiomsg.svg)
-
-[![image](https://img.shields.io/badge/calver-YYYY.MM.MINOR-22bfda.svg)](http://calver.org/)
-
-[![image](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
 # aiomsg
 
