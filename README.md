@@ -96,17 +96,165 @@ further down in rest of this document.
 
 Let's look at the same demo in the other language implementations:
 
+The wire protocol is identical, so any of these ends can talk to the Python
+ends above (and to each other). Each snippet is two complete programs — the
+bind end ("server") and the connect end ("client") — matching the runnable
+`examples/` in each implementation.
+
 ## Rust-sync Demo
 
-TODO
+Blocking calls on background threads; no async runtime. The bind end:
+
+```rust
+use aiomsg::{SendMode, Socket};
+
+fn main() -> aiomsg::Result<()> {
+    let sock = Socket::builder().send_mode(SendMode::Publish).build();
+    sock.bind("127.0.0.1:25000")?;
+    loop {
+        sock.send(format!("{:?}", std::time::SystemTime::now()))?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+```
+
+The connect end:
+
+```rust
+use aiomsg::Socket;
+
+fn main() -> aiomsg::Result<()> {
+    let sock = Socket::new();
+    sock.connect("127.0.0.1:25000")?;
+    for msg in sock.messages() {
+        println!("{}", String::from_utf8_lossy(&msg));
+    }
+    Ok(())
+}
+```
 
 ## Rust-async Demo
 
-TODO
+The same shape with tokio; `bind`/`connect`/`send`/`recv` are `.await`ed. The
+bind end:
+
+```rust
+use aiomsg::{SendMode, Socket};
+
+#[tokio::main]
+async fn main() -> aiomsg::Result<()> {
+    let sock = Socket::builder().send_mode(SendMode::Publish).build();
+    sock.bind("127.0.0.1:25000").await?;
+    loop {
+        sock.send(format!("{:?}", std::time::SystemTime::now())).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+```
+
+The connect end:
+
+```rust
+use aiomsg::Socket;
+
+#[tokio::main]
+async fn main() -> aiomsg::Result<()> {
+    let sock = Socket::new();
+    sock.connect("127.0.0.1:25000").await?;
+    while let Some(msg) = sock.recv().await {
+        println!("{}", String::from_utf8_lossy(&msg));
+    }
+    Ok(())
+}
+```
 
 ## Golang Demo
 
-TODO
+Goroutines and channels under the hood; the public API is plain blocking
+calls. The bind end:
+
+```go
+package main
+
+import (
+	"time"
+
+	aiomsg "github.com/cjrh/aiomsg/golang-lib"
+)
+
+func main() {
+	sock := aiomsg.NewSocket(aiomsg.WithSendMode(aiomsg.Publish))
+	defer sock.Close()
+	sock.Bind("127.0.0.1:25000")
+	for {
+		sock.Send([]byte(time.Now().Format(time.RFC3339)))
+		time.Sleep(time.Second)
+	}
+}
+```
+
+The connect end:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	aiomsg "github.com/cjrh/aiomsg/golang-lib"
+)
+
+func main() {
+	sock := aiomsg.NewSocket()
+	defer sock.Close()
+	sock.Connect("127.0.0.1:25000")
+	for msg := range sock.Messages() {
+		fmt.Println(string(msg.Data))
+	}
+}
+```
+
+## Zig Demo
+
+Built on `std.Io` (the 0.16 interface), which hands `main` its io backend and
+allocator. The bind end:
+
+```zig
+const std = @import("std");
+const aiomsg = @import("aiomsg");
+
+pub fn main(init: std.process.Init) !void {
+    const sock = try aiomsg.Socket.init(init.gpa, init.io, .{ .mode = .publish });
+    defer sock.deinit();
+
+    try sock.bind("127.0.0.1", 25000);
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        var buf: [64]u8 = undefined;
+        sock.send(std.fmt.bufPrint(&buf, "tick {d}", .{i}) catch unreachable);
+        init.io.sleep(std.Io.Duration.fromMilliseconds(1000), .boot) catch {};
+    }
+}
+```
+
+The connect end (`recv` returns null only once the socket is closed and
+drained; the caller owns each payload):
+
+```zig
+const std = @import("std");
+const aiomsg = @import("aiomsg");
+
+pub fn main(init: std.process.Init) !void {
+    const sock = try aiomsg.Socket.init(init.gpa, init.io, .{});
+    defer sock.deinit();
+
+    try sock.connect("127.0.0.1", 25000);
+    while (sock.recv()) |m| {
+        defer init.gpa.free(m.data);
+        std.debug.print("{s}\n", .{m.data});
+    }
+}
+```
 
 # Inspiration
 
