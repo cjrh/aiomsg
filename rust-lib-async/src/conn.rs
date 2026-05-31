@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
@@ -21,9 +22,33 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 
 type ReconnectDelay = std::sync::Arc<dyn Fn() -> Duration + Send + Sync>;
 
+/// How an accepted TCP stream becomes the byte stream we speak the protocol
+/// over: directly (`Plain`) or after a TLS server handshake (`Tls`). This is the
+/// one and only place the bind side knows about TLS; the rest of the connection
+/// machinery is generic over the resulting stream.
+#[derive(Clone)]
+pub(crate) enum Acceptor {
+    Plain,
+    #[cfg(feature = "tls")]
+    Tls(tokio_rustls::TlsAcceptor),
+}
+
+/// The connect-side counterpart of [`Acceptor`]: dial plainly, or perform a TLS
+/// client handshake against the carried server name.
+#[derive(Clone)]
+pub(crate) enum Connector {
+    Plain,
+    #[cfg(feature = "tls")]
+    Tls(
+        tokio_rustls::TlsConnector,
+        tokio_rustls::rustls::pki_types::ServerName<'static>,
+    ),
+}
+
 /// Accept connections until shutdown, spawning a handler per peer.
 pub(crate) async fn accept_loop(
     listener: TcpListener,
+    acceptor: Acceptor,
     cmd_tx: mpsc::UnboundedSender<Command>,
     identity: Identity,
     mut shutdown: Shutdown,
@@ -33,10 +58,20 @@ pub(crate) async fn accept_loop(
             _ = shutdown.recv() => break,
             res = listener.accept() => match res {
                 Ok((stream, _addr)) => {
+                    let _ = stream.set_nodelay(true);
+                    let acceptor = acceptor.clone();
                     let cmd_tx = cmd_tx.clone();
                     let sd = shutdown.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, cmd_tx, identity, sd).await {
+                        let res = match acceptor {
+                            Acceptor::Plain => handle_connection(stream, cmd_tx, identity, sd).await,
+                            #[cfg(feature = "tls")]
+                            Acceptor::Tls(a) => match a.accept(stream).await {
+                                Ok(tls) => handle_connection(tls, cmd_tx, identity, sd).await,
+                                Err(e) => { debug!("TLS server handshake failed: {e}"); Ok(()) }
+                            },
+                        };
+                        if let Err(e) = res {
                             debug!("inbound connection ended: {e}");
                         }
                     });
@@ -51,6 +86,7 @@ pub(crate) async fn accept_loop(
 /// the socket.
 pub(crate) async fn connect_loop<A>(
     addr: A,
+    connector: Connector,
     cmd_tx: mpsc::UnboundedSender<Command>,
     identity: Identity,
     delay: ReconnectDelay,
@@ -69,9 +105,23 @@ pub(crate) async fn connect_loop<A>(
         };
 
         if let Some(stream) = stream {
-            if let Err(e) =
-                handle_connection(stream, cmd_tx.clone(), identity, shutdown.clone()).await
-            {
+            let _ = stream.set_nodelay(true);
+            let res = match &connector {
+                Connector::Plain => {
+                    handle_connection(stream, cmd_tx.clone(), identity, shutdown.clone()).await
+                }
+                #[cfg(feature = "tls")]
+                Connector::Tls(c, name) => match c.connect(name.clone(), stream).await {
+                    Ok(tls) => {
+                        handle_connection(tls, cmd_tx.clone(), identity, shutdown.clone()).await
+                    }
+                    Err(e) => {
+                        debug!("TLS client handshake failed: {e}");
+                        Ok(())
+                    }
+                },
+            };
+            if let Err(e) = res {
                 debug!("outbound connection ended: {e}");
             }
         }
@@ -88,15 +138,18 @@ pub(crate) async fn connect_loop<A>(
 }
 
 /// Drive one established connection: handshake, register with the broker, then
-/// run its reader and writer until either side ends.
-async fn handle_connection(
-    stream: TcpStream,
+/// run its reader and writer until either side ends. Generic over the byte
+/// stream so plain TCP and TLS-wrapped connections share one implementation.
+async fn handle_connection<S>(
+    stream: S,
     cmd_tx: mpsc::UnboundedSender<Command>,
     my_identity: Identity,
     mut shutdown: Shutdown,
-) -> std::io::Result<()> {
-    let _ = stream.set_nodelay(true);
-    let (mut read_half, mut write_half) = stream.into_split();
+) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut read_half, mut write_half) = tokio::io::split(stream);
 
     // --- Handshake: send our HELLO, read and validate the peer's. ----------
     protocol::write_frame(&mut write_half, &protocol::hello(&my_identity)).await?;

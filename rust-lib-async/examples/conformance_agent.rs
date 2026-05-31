@@ -47,11 +47,17 @@ fn parse_args() -> HashMap<String, String> {
 async fn run(args: HashMap<String, String>) -> aiomsg::Result<()> {
     let role = args.get("role").map(String::as_str).unwrap_or("connect");
     let host = args.get("host").map(String::as_str).unwrap_or("127.0.0.1");
-    let port: u16 = args.get("port").and_then(|p| p.parse().ok()).unwrap_or(25000);
+    let port: u16 = args
+        .get("port")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(25000);
     let behavior = args.get("behavior").map(String::as_str).unwrap_or("sink");
     let count: usize = args.get("count").and_then(|c| c.parse().ok()).unwrap_or(10);
     let prefix = args.get("prefix").map(String::as_str).unwrap_or("m");
-    let linger: f64 = args.get("linger").and_then(|l| l.parse().ok()).unwrap_or(1.0);
+    let linger: f64 = args
+        .get("linger")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(1.0);
 
     let send_mode = match args.get("send-mode").map(String::as_str) {
         Some("publish") => SendMode::Publish,

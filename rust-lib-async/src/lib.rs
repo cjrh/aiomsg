@@ -37,6 +37,12 @@ use tokio_stream::Stream;
 pub use bytes::Bytes;
 pub use protocol::{Identity, MsgId};
 
+/// Re-export of the exact `rustls` version this crate links, so building a
+/// [`rustls::ServerConfig`]/[`rustls::ClientConfig`] for [`Socket::bind_tls`]/
+/// [`Socket::connect_tls`] can never hit a version mismatch.
+#[cfg(feature = "tls")]
+pub use tokio_rustls::rustls;
+
 use broker::{Broker, Command};
 
 /// How a socket distributes each sent message across its connected peers.
@@ -64,6 +70,11 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("socket is closed")]
     Closed,
+    /// The string passed to [`Socket::connect_tls`] is not a valid DNS name or
+    /// IP address.
+    #[cfg(feature = "tls")]
+    #[error("invalid TLS server name")]
+    InvalidServerName,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -185,15 +196,37 @@ impl Socket {
     pub async fn bind<A: ToSocketAddrs>(&self, addr: A) -> Result<std::net::SocketAddr> {
         let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
+        self.spawn_accept(listener, conn::Acceptor::Plain);
+        Ok(local_addr)
+    }
+
+    /// Like [`bind`](Socket::bind), but every accepted connection is wrapped in
+    /// a TLS server handshake using `config`. Build the [`rustls::ServerConfig`]
+    /// with your certificate chain and private key (see the crate's `tls`
+    /// example). The wire protocol is identical over TLS; only the transport
+    /// differs, so a TLS socket interoperates with any other implementation's
+    /// TLS socket.
+    #[cfg(feature = "tls")]
+    pub async fn bind_tls<A: ToSocketAddrs>(
+        &self,
+        addr: A,
+        config: std::sync::Arc<rustls::ServerConfig>,
+    ) -> Result<std::net::SocketAddr> {
+        let listener = TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        let acceptor = conn::Acceptor::Tls(tokio_rustls::TlsAcceptor::from(config));
+        self.spawn_accept(listener, acceptor);
+        Ok(local_addr)
+    }
+
+    fn spawn_accept(&self, listener: TcpListener, acceptor: conn::Acceptor) {
         let shutdown = Shutdown::new(self.inner.close_rx.clone());
         let cmd_tx = self.inner.cmd_tx.clone();
         let identity = self.inner.identity;
-
         let handle = tokio::spawn(async move {
-            conn::accept_loop(listener, cmd_tx, identity, shutdown).await;
+            conn::accept_loop(listener, acceptor, cmd_tx, identity, shutdown).await;
         });
         self.inner.tasks.lock().unwrap().push(handle);
-        Ok(local_addr)
     }
 
     /// Connect to a peer at `addr`, reconnecting for the life of the socket.
@@ -201,6 +234,33 @@ impl Socket {
     /// to connect to many peers. Returns immediately; the connection loop runs
     /// in the background.
     pub async fn connect<A>(&self, addr: A) -> Result<()>
+    where
+        A: ToSocketAddrs + Clone + Send + Sync + 'static,
+    {
+        self.spawn_connect(addr, conn::Connector::Plain)
+    }
+
+    /// Like [`connect`](Socket::connect), but each connection performs a TLS
+    /// client handshake against `server_name`, verifying the peer's certificate
+    /// per `config`. `server_name` must match a name in the server's
+    /// certificate (it is independent of the TCP address you dial).
+    #[cfg(feature = "tls")]
+    pub async fn connect_tls<A>(
+        &self,
+        addr: A,
+        server_name: impl Into<String>,
+        config: std::sync::Arc<rustls::ClientConfig>,
+    ) -> Result<()>
+    where
+        A: ToSocketAddrs + Clone + Send + Sync + 'static,
+    {
+        let name = rustls::pki_types::ServerName::try_from(server_name.into())
+            .map_err(|_| Error::InvalidServerName)?;
+        let connector = conn::Connector::Tls(tokio_rustls::TlsConnector::from(config), name);
+        self.spawn_connect(addr, connector)
+    }
+
+    fn spawn_connect<A>(&self, addr: A, connector: conn::Connector) -> Result<()>
     where
         A: ToSocketAddrs + Clone + Send + Sync + 'static,
     {
@@ -213,7 +273,7 @@ impl Socket {
         let delay = self.inner.reconnect_delay.clone();
 
         let handle = tokio::spawn(async move {
-            conn::connect_loop(addr, cmd_tx, identity, delay, shutdown).await;
+            conn::connect_loop(addr, connector, cmd_tx, identity, delay, shutdown).await;
         });
         self.inner.tasks.lock().unwrap().push(handle);
         Ok(())
