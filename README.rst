@@ -28,13 +28,23 @@
 aiomsg
 ======
 
-Pure-Python smart sockets (like ZMQ) for simpler networking
+Smart sockets for simple network communication.
 
 .. figure:: https://upload.wikimedia.org/wikipedia/commons/5/5e/NetworkDecentral.svg
     :target: https://commons.wikimedia.org/wiki/File:NetworkDecentral.svg
     :alt: Diagram of computers linked up in a network
 
     :sub:`Attribution: And1mu [CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0)]`
+
+Features
+--------
+
+- Simple bind/connect semantics for multiple peers
+- Automatic reconnection
+- Message-based, not stream-based
+- Built-in heartbeating
+- Built-in reliability options (at-most-once, at-least-once)
+- Optional TLS, native to each language (no OpenSSL/C toolchain in Rust)
 
 
 Table of Contents
@@ -46,7 +56,7 @@ Table of Contents
 Implementations
 ===============
 
-``aiomsg`` is a *family* of native implementations of one shared wire
+``aiomsg`` is a *family* of native language implementations of one shared wire
 protocol. A socket written in any of these languages interoperates on the wire
 with a socket written in any other. Each implementation is idiomatic to its
 language (no C bindings, no FFI wrappers), and each lives in its own
@@ -61,13 +71,19 @@ Directory         Implementation                                      Status
 ``golang-lib/``   Go, goroutines + channels                           available
 ================  ==================================================  ==========
 
+Every implementation supports TLS, using its language's idiomatic facility
+(rustls with the pure-Rust ``ring`` backend for both Rust crates, ``crypto/tls``
+for Go, the standard ``ssl`` module for Python). TLS sockets interoperate across
+languages just as plain ones do — the cross-language conformance suite exercises
+both transports. See each implementation's README for the TLS API.
+
 The canonical, language-independent wire specification lives in
 `PROTOCOL.md <PROTOCOL.md>`_. The overall plan and per-language design notes are
 in `DESIGN.md <DESIGN.md>`_.
 
 The code examples throughout this document are in Python (the reference), but
 the design principles, message-distribution patterns, and developer experience
-described below are shared by every implementation — only the spelling differs
+described below are shared by every implementation. Only the spelling differs
 (async/await in Python and Rust-async; goroutines and channels in Go; blocking
 calls in Rust-sync).
 
@@ -113,6 +129,23 @@ Note that these are both complete, runnable programs, not fragments.
 Looks a lot like conventional socket programming, except that *these*
 sockets have a few extra tricks. These are described in more detail
 further down in rest of this document.
+
+Let's look at the same demo in the other language implementations:
+
+Rust-sync Demo
+--------------
+
+TODO
+
+Rust-async Demo
+---------------
+
+TODO
+
+Golang Demo
+-----------
+
+TODO
 
 Inspiration
 ===========
@@ -372,10 +405,6 @@ the high-level features:
     interesting feature and I may work on it in the future, but it isn't
     there right now.)
 
-#.  Pure python, doesn't require a compiler
-
-#.  Depends only on the Python standard library
-
 
 Cookbook
 ========
@@ -383,7 +412,7 @@ Cookbook
 The message distribution patterns are what make ``aiomsg`` powerful. It
 is the way you connect up a whole bunch of microservices that brings the
 greatest leverage. We'll go through the different scenarios using a
-cookbook format.
+cookbook format. These examples are in Python, but the same patterns apply to all implementations.
 
 In the code snippets that follow, you should assumed that each snippet
 is a complete working program, except that some boilerplate is omitted.

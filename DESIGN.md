@@ -354,10 +354,13 @@ runner.
 | **5. Conformance harness** | `conformance/` runner + Rust↔Python scenarios | Rust-async interoperates with Python | ✅ done |
 | **6. Rust sync** | `rust-lib-sync` (independent crate) | Conformance scenarios pass | ✅ done |
 | **7. Go** | `golang-lib` | Conformance scenarios pass | ✅ done |
-| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published | ◑ TLS + publishing remain |
+| **8. Polish** | Per-language docs, examples, CI matrix, releases | All langs documented + published | ◑ publishing remains |
 
-TLS is a cross-cutting follow-up within phases 4/6/7 (the protocol is identical
-with or without it); `rust-lib-async` currently runs plain TCP.
+TLS is implemented in all four languages and exercised by the conformance suite
+(rustls/ring for both Rust crates, `crypto/tls` for Go, OpenSSL-backed `ssl` for
+Python). The protocol is identical with or without it. The remaining Phase 8
+work is package publishing (crates.io for the two Rust crates, Go module
+tagging, PyPI for Python).
 
 Phases 4→7 each follow the same internal rhythm: framing/parsing → handshake +
 heartbeat → multiplex + send modes → reconnect + buffering → delivery guarantee

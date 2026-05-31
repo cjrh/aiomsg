@@ -31,3 +31,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 # Test/example helpers: generate self-signed certs and read PEM files. Pure Rust.
 rcgen = "0.13"
 rustls-pemfile = "2"
+
+# The TLS demo only builds when the `tls` feature is on.
+[[example]]
+name = "tls"
+required-features = ["tls"]
