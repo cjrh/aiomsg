@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Aiomsg</RootNamespace>
+    <AssemblyName>Aiomsg</AssemblyName>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project exercises the internal Protocol layer directly. -->
+    <InternalsVisibleTo Include="Aiomsg.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -35,11 +35,15 @@ subdirectory:
 | `cpp-lib-async/` | C++, async (Asio + C++20 coroutines) | available |
 | `zig-lib/` | Zig, `std.Io` | available |
 | `java-lib/` | Java, blocking I/O on virtual threads | available |
+| `javascript-lib/` | JavaScript, Node.js async (`net`/`tls`) | available |
+| `csharp-lib/` | C#, async/await (`SslStream`) | available |
+| `lua-lib/` | Lua, cooperative reactor (LuaSocket + LuaSec) | available |
 
 Every implementation supports TLS, using its language's idiomatic facility
 (rustls with the pure-Rust `ring` backend for both Rust crates, `crypto/tls`
-for Go, the standard `ssl` module for Python, OpenSSL for C/C++/Zig, and JSSE
-for Java). TLS sockets interoperate across languages just as plain ones do. The
+for Go, the standard `ssl` module for Python, OpenSSL for C/C++/Zig, JSSE for
+Java, Node's `tls` module for JavaScript, `SslStream` for C#, and LuaSec for
+Lua). TLS sockets interoperate across languages just as plain ones do. The
 cross-language conformance suite exercises both transports. See each
 implementation's README for the TLS API.
 
@@ -254,6 +258,87 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("{s}\n", .{m.data});
     }
 }
+```
+
+## JavaScript Demo
+
+Node.js, ES modules, zero runtime dependencies. The bind end:
+
+```javascript
+import { Socket, SendMode } from "aiomsg";
+
+const sock = new Socket({ sendMode: SendMode.PUBLISH });
+await sock.bind("127.0.0.1", 25000);
+setInterval(() => sock.send(Buffer.from(new Date().toString())), 1000);
+```
+
+The connect end (`messages()` is an async iterator; it ends when the socket
+closes):
+
+```javascript
+import { Socket } from "aiomsg";
+
+const sock = new Socket();
+await sock.connect("127.0.0.1", 25000);
+for await (const msg of sock.messages()) {
+  console.log(msg.toString("utf8"));
+}
+```
+
+## C# Demo
+
+Idiomatic `async`/`await`; `Socket` is `IAsyncDisposable`. The bind end:
+
+```csharp
+using Aiomsg;
+
+await using var sock = new Socket(SendMode.Publish);
+await sock.BindAsync("127.0.0.1", 25000);
+while (true)
+{
+    sock.Send(System.Text.Encoding.UTF8.GetBytes(DateTime.Now.ToString("O")));
+    await Task.Delay(1000);
+}
+```
+
+The connect end:
+
+```csharp
+using Aiomsg;
+
+await using var sock = new Socket();
+sock.Connect("127.0.0.1", 25000);
+await foreach (var message in sock.Messages())
+    Console.WriteLine(System.Text.Encoding.UTF8.GetString(message));
+```
+
+## Lua Demo
+
+A cooperative reactor on LuaSocket/LuaSec, driven by the calls that wait on it
+(`run` pumps without receiving; `recv`/`messages` pump while receiving). The
+bind end:
+
+```lua
+local aiomsg = require("aiomsg")
+
+local sock = aiomsg.Socket.new({ send_mode = aiomsg.SendMode.PUBLISH })
+sock:bind("127.0.0.1", 25000)
+while true do
+  sock:send(os.date())
+  sock:run(1.0)
+end
+```
+
+The connect end:
+
+```lua
+local aiomsg = require("aiomsg")
+
+local sock = aiomsg.Socket.new()
+sock:connect("127.0.0.1", 25000)
+for message in sock:messages() do
+  print(message)
+end
 ```
 
 # Inspiration

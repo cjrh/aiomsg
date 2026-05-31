@@ -1,0 +1,24 @@
+# aiomsg (Lua) — build & test
+#
+# Pure Lua (5.3+) on top of LuaSocket and LuaSec. There is no build step; the
+# only setup is installing the two rocks:
+#   luarocks install luasocket
+#   luarocks install luasec
+# The conformance suite runs the agent the same way: `lua conformance_agent.lua`.
+
+# Show available recipes.
+default:
+    @just --list
+
+# Run the test suite (protocol unit tests + TCP/TLS integration).
+test:
+    lua test/protocol_test.lua
+    lua test/integration_test.lua
+
+# Run an example: `just run server`, `just run client`, or `just run tls`.
+run example:
+    lua examples/{{example}}.lua
+
+# Run the conformance agent, e.g.: just agent --role bind --port 25000 ...
+agent *ARGS:
+    lua conformance_agent.lua {{ARGS}}

@@ -1,0 +1,17 @@
+{
+  "name": "aiomsg",
+  "version": "1.0.0",
+  "description": "Native JavaScript implementation of the aiomsg wire protocol: smart sockets for simple network communication.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "Apache-2.0"
+}

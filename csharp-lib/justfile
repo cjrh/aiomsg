@@ -1,0 +1,25 @@
+# aiomsg (C#) — build & test
+#
+# Everything runs through the .NET SDK (`dotnet`). The conformance suite builds
+# the agent project on its own (see ../conformance) and runs the produced
+# `conformance_agent` binary directly.
+
+# Show available recipes.
+default:
+    @just --list
+
+# Build the whole solution.
+build:
+    dotnet build
+
+# Run the test suite (protocol unit tests + TCP/TLS integration).
+test:
+    dotnet test
+
+# Run an example: `just run server`, `just run client`, or `just run tls`.
+run example:
+    dotnet run --project Examples -- {{example}}
+
+# Run the conformance agent, e.g.: just agent --role bind --port 25000 ...
+agent *ARGS:
+    dotnet run --project ConformanceAgent -- {{ARGS}}

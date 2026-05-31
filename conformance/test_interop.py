@@ -29,7 +29,12 @@ CPP_SYNC_DIR = REPO_ROOT / "cpp-lib-sync"
 CPP_ASYNC_DIR = REPO_ROOT / "cpp-lib-async"
 ZIG_DIR = REPO_ROOT / "zig-lib"
 JAVA_DIR = REPO_ROOT / "java-lib"
+JS_DIR = REPO_ROOT / "javascript-lib"
+CSHARP_DIR = REPO_ROOT / "csharp-lib"
+LUA_DIR = REPO_ROOT / "lua-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
+JS_AGENT = JS_DIR / "conformance_agent.js"
+LUA_AGENT = LUA_DIR / "conformance_agent.lua"
 # Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
 # example). It is its own trust anchor, so the same file is both cert and CA.
 CERTS = REPO_ROOT / "conformance" / "certs"
@@ -87,12 +92,30 @@ SCENARIOS = [
     ("python", "bind", "java", "connect", "roundrobin", "at-most-once"),
     ("java", "bind", "python", "connect", "publish", "at-most-once"),
     ("java", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # JavaScript (Node) interop with Python.
+    ("python", "bind", "javascript", "connect", "roundrobin", "at-most-once"),
+    ("javascript", "bind", "python", "connect", "publish", "at-most-once"),
+    ("javascript", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # C# interop with Python.
+    ("python", "bind", "csharp", "connect", "roundrobin", "at-most-once"),
+    ("csharp", "bind", "python", "connect", "publish", "at-most-once"),
+    ("csharp", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # Lua interop with Python.
+    ("python", "bind", "lua", "connect", "roundrobin", "at-most-once"),
+    ("lua", "bind", "python", "connect", "publish", "at-most-once"),
+    ("lua", "connect", "python", "bind", "roundrobin", "at-least-once"),
     # Cross-native interop (no Python in the loop) across the whole family.
     ("c", "bind", "cpp-async", "connect", "roundrobin", "at-most-once"),
     ("zig", "bind", "java", "connect", "publish", "at-most-once"),
     ("cpp-sync", "connect", "go", "bind", "roundrobin", "at-least-once"),
     ("rust", "bind", "zig", "connect", "roundrobin", "at-most-once"),
     ("java", "connect", "rust-sync", "bind", "roundrobin", "at-least-once"),
+    ("javascript", "bind", "go", "connect", "publish", "at-most-once"),
+    ("rust", "connect", "javascript", "bind", "roundrobin", "at-least-once"),
+    ("csharp", "bind", "javascript", "connect", "roundrobin", "at-most-once"),
+    ("go", "connect", "csharp", "bind", "roundrobin", "at-least-once"),
+    ("lua", "bind", "rust", "connect", "publish", "at-most-once"),
+    ("javascript", "connect", "lua", "bind", "roundrobin", "at-least-once"),
 ]
 
 # The same matrix, but over TLS — proving every implementation speaks the
@@ -113,6 +136,12 @@ TLS_SCENARIOS = [
     ("python", "bind", "cpp-async", "connect", "roundrobin", "at-most-once"),
     ("zig", "bind", "python", "connect", "publish", "at-most-once"),
     ("python", "bind", "java", "connect", "roundrobin", "at-least-once"),
+    ("javascript", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "javascript", "connect", "roundrobin", "at-least-once"),
+    ("csharp", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "csharp", "connect", "roundrobin", "at-least-once"),
+    ("lua", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "lua", "connect", "roundrobin", "at-least-once"),
     # Cross-native TLS interop.
     ("c", "connect", "cpp-async", "bind", "roundrobin", "at-most-once"),
     ("java", "bind", "zig", "connect", "roundrobin", "at-least-once"),
@@ -250,6 +279,43 @@ def java_agent_cmd():
 
 
 @pytest.fixture(scope="session")
+def node_agent_cmd():
+    """The JavaScript agent runs straight from source under Node — no build or
+    install step (the implementation has zero runtime dependencies)."""
+    if not _have("node"):
+        pytest.skip("node not available")
+    return ["node", str(JS_AGENT)]
+
+
+@pytest.fixture(scope="session")
+def csharp_agent_exe():
+    """Build the C# conformance agent once with `dotnet build` and return the
+    produced native launcher binary."""
+    if not _have("dotnet"):
+        pytest.skip("dotnet not available")
+    project = CSHARP_DIR / "ConformanceAgent" / "ConformanceAgent.csproj"
+    proc = subprocess.run(
+        ["dotnet", "build", str(project), "-c", "Release", "--nologo"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        pytest.fail(f"failed to build c# agent:\n{proc.stdout}\n{proc.stderr}")
+    exe = CSHARP_DIR / "ConformanceAgent" / "bin" / "Release" / "net9.0" / "conformance_agent"
+    assert exe.exists(), f"agent not found at {exe}"
+    return str(exe)
+
+
+@pytest.fixture(scope="session")
+def lua_agent_cmd():
+    """The Lua agent runs straight from source (no build step); it needs the
+    `lua` interpreter plus the LuaSocket and LuaSec rocks."""
+    if not _have("lua"):
+        pytest.skip("lua not available")
+    return ["lua", str(LUA_AGENT)]
+
+
+@pytest.fixture(scope="session")
 def agents(
     rust_agent_exe,
     rust_sync_agent_exe,
@@ -259,6 +325,9 @@ def agents(
     cpp_async_agent_exe,
     zig_agent_exe,
     java_agent_cmd,
+    node_agent_cmd,
+    csharp_agent_exe,
+    lua_agent_cmd,
 ):
     """Built native-agent invocations, keyed by language. A value is either a
     binary path (string) or a full command prefix (list, e.g. for Java)."""
@@ -271,6 +340,9 @@ def agents(
         "cpp-async": cpp_async_agent_exe,
         "zig": zig_agent_exe,
         "java": java_agent_cmd,
+        "javascript": node_agent_cmd,
+        "csharp": csharp_agent_exe,
+        "lua": lua_agent_cmd,
     }
 
 

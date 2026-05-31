@@ -1,0 +1,21 @@
+# aiomsg (JavaScript) — build & test
+#
+# Pure Node.js with zero runtime dependencies, so there is no build step and
+# nothing to install. The conformance suite runs the agent the same way:
+# `node conformance_agent.js ...` (see ../conformance).
+
+# Show available recipes.
+default:
+    @just --list
+
+# Run the test suite (protocol unit tests + TCP/TLS integration).
+test:
+    node --test
+
+# Run an example: `just run server`, `just run client`, or `just run tls`.
+run example:
+    node examples/{{example}}.js
+
+# Run the conformance agent, e.g.: just agent --role bind --port 25000 ...
+agent *ARGS:
+    node conformance_agent.js {{ARGS}}

@@ -22,6 +22,18 @@ test-rust-sync:
 test-golang:
     cd golang-lib && just test
 
+# Run the JavaScript (Node) implementation's test suite.
+test-javascript:
+    cd javascript-lib && just test
+
+# Run the C# implementation's test suite.
+test-csharp:
+    cd csharp-lib && just test
+
+# Run the Lua implementation's test suite.
+test-lua:
+    cd lua-lib && just test
+
 # Run the cross-language conformance (interop) suite.
 test-conformance:
     uv run --project python-lib --group test pytest conformance/ -v
@@ -31,7 +43,7 @@ test-all:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
-    for d in python-lib rust-lib-async rust-lib-sync golang-lib; do
+    for d in python-lib rust-lib-async rust-lib-sync golang-lib javascript-lib csharp-lib lua-lib; do
         if [[ -f "$d/justfile" ]]; then
             echo "=== $d ==="
             (cd "$d" && just test) || rc=1

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Aiomsg.Examples</RootNamespace>
+    <!-- One of Server / Client / Tls, selected by the first CLI argument. -->
+    <StartupObject>Aiomsg.Examples.Launcher</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Aiomsg/Aiomsg.csproj" />
+  </ItemGroup>
+
+</Project>
