@@ -50,6 +50,25 @@ See `examples/server` and `examples/client` (`go run ./examples/server`).
 | receive channel | `for m := range sock.Messages()` |
 | shut down | `sock.Close()` |
 
+## TLS
+
+TLS uses the standard library's `crypto/tls` — no extra dependencies. Pass a
+`*tls.Config` to `BindTLS` / `ConnectTLS`. The bind side presents a certificate;
+the connect side verifies it (put the expected name in `cfg.ServerName` and the
+trusted roots in `cfg.RootCAs`):
+
+```go
+server := aiomsg.NewSocket()
+server.BindTLS("127.0.0.1:25000", serverConfig) // *tls.Config with a certificate
+
+client := aiomsg.NewSocket()
+client.ConnectTLS(addr, &tls.Config{RootCAs: pool, ServerName: "example.com"})
+```
+
+Because `*tls.Conn` is a `net.Conn`, everything downstream is unchanged, and a
+TLS socket interoperates with any other implementation's TLS socket. See
+`examples/tls` (`go run ./examples/tls`) for a self-contained, runnable demo.
+
 ## Development
 
 Uses [just](https://github.com/casey/just):
@@ -62,5 +81,7 @@ just fmt        # gofmt -w .
 
 ## Status
 
-Implements the full protocol v1 over plain TCP. **TLS is not yet wired up** (a
-planned follow-up; the protocol is identical with or without it).
+Implements the full protocol v1: framing, typed envelopes, the HELLO handshake
+with version check and identity de-duplication, heartbeating,
+publish/round-robin/identity routing, send buffering, reconnection,
+at-least-once delivery, and TLS (crypto/tls).

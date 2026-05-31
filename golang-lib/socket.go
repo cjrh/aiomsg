@@ -19,6 +19,7 @@ package aiomsg
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"net"
 	"sync"
@@ -137,25 +138,53 @@ func (s *Socket) Identity() Identity { return s.identity }
 // Bind listens on addr and accepts many peer connections, returning the local
 // address actually bound (useful with port 0). May be combined with Connect.
 func (s *Socket) Bind(addr string) (string, error) {
+	return s.bind(addr, nil)
+}
+
+// BindTLS is like Bind, but every accepted connection is wrapped in a TLS
+// server handshake using cfg (which must carry a certificate chain and private
+// key). The wire protocol is identical over TLS, so a TLS socket interoperates
+// with any other implementation's TLS socket.
+func (s *Socket) BindTLS(addr string, cfg *tls.Config) (string, error) {
+	return s.bind(addr, cfg)
+}
+
+func (s *Socket) bind(addr string, cfg *tls.Config) (string, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return "", err
 	}
+	local := ln.Addr().String()
+	if cfg != nil {
+		ln = tls.NewListener(ln, cfg)
+	}
 	s.wg.Add(1)
 	go s.acceptLoop(ln)
-	return ln.Addr().String(), nil
+	return local, nil
 }
 
 // Connect connects to a peer at addr, reconnecting for the life of the socket.
 // May be called multiple times (and combined with Bind). Returns immediately.
 func (s *Socket) Connect(addr string) error {
+	return s.connect(addr, nil)
+}
+
+// ConnectTLS is like Connect, but each connection performs a TLS client
+// handshake, verifying the peer's certificate per cfg. Put the expected
+// certificate name in cfg.ServerName (it is independent of the TCP address you
+// dial) and the trusted roots in cfg.RootCAs.
+func (s *Socket) ConnectTLS(addr string, cfg *tls.Config) error {
+	return s.connect(addr, cfg)
+}
+
+func (s *Socket) connect(addr string, cfg *tls.Config) error {
 	select {
 	case <-s.ctx.Done():
 		return ErrClosed
 	default:
 	}
 	s.wg.Add(1)
-	go s.connectLoop(addr)
+	go s.connectLoop(addr, cfg)
 	return nil
 }
 

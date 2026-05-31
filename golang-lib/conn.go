@@ -6,6 +6,7 @@ package aiomsg
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"sync"
 	"time"
@@ -37,7 +38,7 @@ func (s *Socket) acceptLoop(ln net.Listener) {
 	}
 }
 
-func (s *Socket) connectLoop(addr string) {
+func (s *Socket) connectLoop(addr string, tlsConfig *tls.Config) {
 	defer s.wg.Done()
 	for {
 		select {
@@ -47,7 +48,14 @@ func (s *Socket) connectLoop(addr string) {
 		}
 
 		d := net.Dialer{Timeout: connectTimeout}
-		conn, err := d.DialContext(s.ctx, "tcp", addr)
+		var conn net.Conn
+		var err error
+		if tlsConfig != nil {
+			// tls.Dialer completes the TLS handshake as part of dialing.
+			conn, err = (&tls.Dialer{NetDialer: &d, Config: tlsConfig}).DialContext(s.ctx, "tcp", addr)
+		} else {
+			conn, err = d.DialContext(s.ctx, "tcp", addr)
+		}
 		if err == nil {
 			s.handleConnection(conn)
 		}
@@ -64,9 +72,7 @@ func (s *Socket) connectLoop(addr string) {
 // the broker, then run reader and writer until either side ends.
 func (s *Socket) handleConnection(conn net.Conn) {
 	defer conn.Close()
-	if tcp, ok := conn.(*net.TCPConn); ok {
-		_ = tcp.SetNoDelay(true)
-	}
+	setNoDelay(conn)
 
 	// Handshake: send our HELLO, read and validate the peer's.
 	if err := writeFrame(conn, encodeHello(s.identity)); err != nil {
@@ -174,6 +180,17 @@ func runWriter(ctx context.Context, conn net.Conn, writerCh chan []byte) {
 			}
 			timer.Reset(heartbeatInterval)
 		}
+	}
+}
+
+// setNoDelay disables Nagle's algorithm on the connection's underlying TCP
+// socket, reaching through a *tls.Conn if necessary.
+func setNoDelay(conn net.Conn) {
+	if tc, ok := conn.(*tls.Conn); ok {
+		conn = tc.NetConn()
+	}
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
 	}
 }
 
