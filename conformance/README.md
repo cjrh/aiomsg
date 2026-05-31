@@ -12,6 +12,10 @@ The agent can play a `source` (send N messages), a `sink` (receive N and print
 them), or an `echo`, in either `bind` or `connect` role, with a chosen send mode
 and delivery guarantee.
 
+The runner also exercises the two TLS-latency experiments (`rust-split`,
+`rust-chan`) the same way, which is how their different TLS I/O strategies are
+proven protocol-correct — including against each other.
+
 The pytest runner (`test_interop.py`) pairs two agents — any two languages, any
 role split (exactly one binds) — over real TCP loopback, then asserts the sink
 received exactly what the source sent. The scenario matrix covers:

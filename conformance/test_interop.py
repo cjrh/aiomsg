@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_LIB = REPO_ROOT / "python-lib"
 RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
 RUST_SYNC_DIR = REPO_ROOT / "rust-lib-sync"
+RUST_SPLIT_DIR = REPO_ROOT / "rust-sync-split"
+RUST_CHAN_DIR = REPO_ROOT / "rust-sync-chan"
 GOLANG_DIR = REPO_ROOT / "golang-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
 # Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
@@ -62,6 +64,9 @@ SCENARIOS = [
     ("rust-sync", "connect", "rust", "bind", "roundrobin", "at-most-once"),
     ("go", "bind", "rust-sync", "connect", "publish", "at-most-once"),
     ("rust-sync", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # The zero-latency experiments speak the same wire over plain TCP too.
+    ("rust-split", "bind", "python", "connect", "roundrobin", "at-most-once"),
+    ("rust-chan", "connect", "go", "bind", "publish", "at-most-once"),
 ]
 
 # The same matrix, but over TLS — proving every implementation speaks the
@@ -75,6 +80,15 @@ TLS_SCENARIOS = [
     ("rust-sync", "bind", "go", "connect", "roundrobin", "at-most-once"),
     ("rust", "bind", "rust-sync", "connect", "roundrobin", "at-most-once"),
     ("python", "connect", "go", "bind", "roundrobin", "at-least-once"),
+    # The zero-latency TLS experiments must interoperate with everyone else and
+    # with each other — this is what proves their split / epoll TLS handling is
+    # protocol-correct, not just internally consistent.
+    ("rust-split", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "rust-split", "connect", "roundrobin", "at-most-once"),
+    ("rust-chan", "bind", "go", "connect", "publish", "at-most-once"),
+    ("go", "bind", "rust-chan", "connect", "roundrobin", "at-most-once"),
+    ("rust-split", "connect", "rust-chan", "bind", "roundrobin", "at-most-once"),
+    ("rust-chan", "connect", "python", "bind", "roundrobin", "at-least-once"),
 ]
 
 # Each parametrized case is (scenario tuple, tls flag).
@@ -131,6 +145,16 @@ def rust_sync_agent_exe():
 
 
 @pytest.fixture(scope="session")
+def rust_split_agent_exe():
+    return _build_cargo_example(RUST_SPLIT_DIR)
+
+
+@pytest.fixture(scope="session")
+def rust_chan_agent_exe():
+    return _build_cargo_example(RUST_CHAN_DIR)
+
+
+@pytest.fixture(scope="session")
 def go_agent_exe(tmp_path_factory):
     """Build the Go conformance agent once and return its binary path."""
     if not _have("go"):
@@ -148,11 +172,19 @@ def go_agent_exe(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def agents(rust_agent_exe, rust_sync_agent_exe, go_agent_exe):
+def agents(
+    rust_agent_exe,
+    rust_sync_agent_exe,
+    rust_split_agent_exe,
+    rust_chan_agent_exe,
+    go_agent_exe,
+):
     """Built native-agent binaries, keyed by language."""
     return {
         "rust": rust_agent_exe,
         "rust-sync": rust_sync_agent_exe,
+        "rust-split": rust_split_agent_exe,
+        "rust-chan": rust_chan_agent_exe,
         "go": go_agent_exe,
     }
 
