@@ -47,12 +47,18 @@ subdirectory:
 | `rust-lib-async/` | Rust, async (tokio) | available |
 | `rust-lib-sync/` | Rust, synchronous (threads) | available |
 | `golang-lib/` | Go, goroutines + channels | available |
+| `c-lib/` | C, synchronous (pthreads) | available |
+| `cpp-lib-sync/` | C++, synchronous (std::thread) | available |
+| `cpp-lib-async/` | C++, async (Asio + C++20 coroutines) | available |
+| `zig-lib/` | Zig, `std.Io` | available |
+| `java-lib/` | Java, blocking I/O on virtual threads | available |
 
 Every implementation supports TLS, using its language's idiomatic facility
 (rustls with the pure-Rust `ring` backend for both Rust crates, `crypto/tls`
-for Go, the standard `ssl` module for Python). TLS sockets interoperate across
-languages just as plain ones do — the cross-language conformance suite exercises
-both transports. See each implementation's README for the TLS API.
+for Go, the standard `ssl` module for Python, OpenSSL for C/C++/Zig, and JSSE
+for Java). TLS sockets interoperate across languages just as plain ones do — the
+cross-language conformance suite exercises both transports. See each
+implementation's README for the TLS API.
 
 The canonical, language-independent wire specification lives in
 [PROTOCOL.md](PROTOCOL.md). The overall plan and per-language design notes are
