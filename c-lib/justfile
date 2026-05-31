@@ -1,0 +1,11 @@
+# aiomsg (C) — build & test
+
+build:
+    cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build
+
+test: build
+    ctest --test-dir build --output-on-failure
+
+clean:
+    rm -rf build
