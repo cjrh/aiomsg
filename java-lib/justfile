@@ -1,22 +1,22 @@
 # aiomsg (Java) — build & test
 #
-# Uses plain javac/java (no Gradle wrapper required). build.gradle.kts is
-# provided as the idiomatic project descriptor for when a Gradle install is
-# available; the conformance suite compiles via javac directly.
-
-classes := "build/classes"
-certs := "../conformance/certs"
+# Everything runs through the committed Gradle wrapper (./gradlew), so no system
+# Gradle install is needed. The conformance suite compiles the agent with plain
+# javac (see ../conformance), independent of this build.
 
 build:
-    mkdir -p {{classes}}
-    javac -d {{classes}} src/main/java/aiomsg/*.java src/test/java/aiomsg/*.java
+    ./gradlew build
 
-test: build
-    java -cp {{classes}} aiomsg.Tests {{certs}}
+test:
+    ./gradlew test
+
+# Run an example: `just run Server`, `just run Client`, or `just run Tls`.
+run example:
+    ./gradlew run{{example}}
 
 # Run the conformance agent, e.g.: just agent --role bind --port 25000 ...
-agent *ARGS: build
-    java -cp {{classes}} aiomsg.ConformanceAgent {{ARGS}}
+agent *ARGS:
+    ./gradlew run --args="{{ARGS}}" -q
 
 clean:
-    rm -rf build
+    ./gradlew clean
