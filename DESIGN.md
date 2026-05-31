@@ -273,18 +273,15 @@ The canonical API (§4) realized natively. Same shape, different spelling.
   send from a different thread than you receive on. (No callback receive API —
   kept consistent with the rest of the family and the reference's "no callback
   handlers" ergonomic.)
-- Internals: a central broker thread plus **one thread per connection** that
-  interleaves reading and writing, communicating via `std::sync::mpsc`. The
-  single-thread-per-connection model (rather than separate reader/writer
-  threads) is required because a TLS connection is one stateful object that
-  cannot be split across two threads; the thread sets a short socket read
-  timeout and, each loop, drains the outbound queue, heartbeats if idle, then
-  reads via a partial-read-safe `FrameDecoder`. Plain TCP uses the same path.
-- **Trade-off (accepted):** an outbound message sent while a connection is
-  otherwise idle waits up to one poll interval (`POLL_INTERVAL`, 50 ms). This is
-  intrinsic to blocking threads + a non-splittable TLS stream — eliminating it
-  needs a readiness reactor (async, or `mio`), which would defeat the crate's
-  "no async runtime" purpose. See §10.
+- Internals: a central broker thread plus a **reader thread + writer thread per
+  connection**, communicating via `std::sync::mpsc`. This gives zero-latency
+  duplex (the writer sends the instant the broker queues a frame) for both plain
+  TCP and TLS. A rustls connection can't be split across two threads, so the TLS
+  path shares the rustls `Connection` behind a short-lived mutex while doing the
+  blocking socket I/O on a `try_clone`d fd ("separate socket I/O from TLS
+  state"). The full rationale and the rejected alternatives (a polling loop; a
+  hand-rolled epoll reactor; a `block_on`-over-async wrapper) are written up in
+  `rust-lib-sync/docs/threading-and-tls.md`.
 - **Independent** of the async crate — it reimplements the (simple) framing and
   envelope logic itself; no shared core crate, and explicitly **not** a
   `block_on` wrapper over `rust-lib-async`.
@@ -399,20 +396,16 @@ Resolved:
    maximises coupling (the opposite of decision 3), adds `block_on` reentrancy
    hazards, and makes the sync↔async conformance test near-tautological. Kept
    independent and threaded.
-5. **Sync outbound poll latency (≤50 ms when idle)** — **accepted in the
-   baseline `rust-lib-sync`**, and **explored away in two experiment crates:**
-   - `rust-sync-split` — keep blocking threads, but recognise the TCP fd is
-     duplex-splittable; share only the rustls `Connection` behind a short-held
-     `Mutex` (the *"separate socket I/O from TLS state"* strategy). Reader and
-     writer threads, zero added latency. Simplest; recommended if the baseline's
-     latency ever matters.
-   - `rust-sync-chan` — a per-connection epoll reactor (`polling` crate) + a
-     notifying sender. Zero latency, one thread/connection, but a hand-rolled
-     event loop ("async-in-disguise"); its real payoff (a single global reactor
-     for many connections) is left as a follow-up. Confirms the research's view
-     that for thread-per-connection code, `split` is preferable.
-
-   Both interoperate on the wire with the whole family (conformance suite).
+5. **Sync outbound poll latency** — **resolved.** The original `rust-lib-sync`
+   drove each connection with one polling thread (≤50 ms idle latency). Two
+   strategies were prototyped to remove it (the *"separate socket I/O from TLS
+   state"* split, and a per-connection epoll reactor). The **split** approach
+   won — zero latency, no new deps, contained in `conn.rs` — and is now the
+   `rust-lib-sync` implementation (reader + writer threads, rustls `Connection`
+   behind a short-held mutex). The epoll-reactor approach was dropped as
+   "async-in-disguise" with no edge over the split at per-connection scope; for
+   high connection counts use `rust-lib-async`. Full write-up:
+   `rust-lib-sync/docs/threading-and-tls.md`.
 6. **Callback receive API for the sync crate** — **rejected.** Kept
    `recv()`/`messages()` for consistency with the rest of the family and the
    reference's "no callback handlers" ergonomic; avoids Rust `Fn + Send` capture

@@ -60,6 +60,55 @@ fn tls_roundtrip() {
     client.close();
 }
 
+/// The whole point of this experiment: outbound messages over TLS are sent the
+/// instant they are queued, with no poll interval. 20 sequential round-trips
+/// finish near-instantly; the baseline poll design (≈50 ms each way when idle)
+/// would take seconds.
+#[test]
+fn tls_round_trips_are_prompt() {
+    use std::time::Instant;
+
+    let (server_cfg, client_cfg) = local_tls_configs();
+    let server = Socket::new();
+    let addr = server.bind_tls("127.0.0.1:0", server_cfg).unwrap();
+    let client = Socket::new();
+    client.connect_tls(addr, "localhost", client_cfg).unwrap();
+
+    // Server echoes every message until the socket closes.
+    let echo = {
+        let server = server.clone();
+        std::thread::spawn(move || {
+            while let Some(msg) = server.recv() {
+                if server.send(msg).is_err() {
+                    break;
+                }
+            }
+        })
+    };
+
+    // Warm up one round-trip so the timed loop excludes connect/handshake.
+    client.send("warmup").unwrap();
+    assert!(client.recv_timeout(Duration::from_secs(5)).is_some());
+
+    let start = Instant::now();
+    for i in 0..20 {
+        let ping = format!("ping{i}");
+        client.send(ping.clone()).unwrap();
+        let got = client.recv_timeout(Duration::from_secs(5));
+        assert_eq!(got.as_deref(), Some(ping.as_bytes()));
+    }
+    let elapsed = start.elapsed();
+
+    server.close();
+    client.close();
+    let _ = echo.join();
+
+    assert!(
+        elapsed < Duration::from_millis(800),
+        "20 TLS round-trips took {elapsed:?}; expected prompt (zero-poll) delivery"
+    );
+}
+
 #[test]
 fn connect_tls_rejects_bad_server_name() {
     let (_server_cfg, client_cfg) = local_tls_configs();

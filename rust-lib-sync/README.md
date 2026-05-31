@@ -79,10 +79,13 @@ implementation's TLS socket. See `examples/tls.rs` (`cargo run --example tls`)
 for a self-contained, runnable demo, including how to load a real certificate
 chain from PEM files.
 
-Because a TLS connection is a single object that can't be split across two
-threads, each connection is driven by one thread that interleaves reading and
-writing (plain TCP uses the same path). This adds at most a few tens of
-milliseconds of latency to a message sent while a connection is otherwise idle.
+Each connection runs a reader thread and a writer thread, so an outbound message
+is sent the instant it is queued — zero added latency, for both plain TCP and
+TLS. A rustls connection can't actually be split across two threads, so the TLS
+path shares the rustls `Connection` behind a short-lived mutex while doing the
+blocking socket I/O on a cloned fd. The reasoning, the alternatives that were
+considered, and the trade-offs are written up in
+[`docs/threading-and-tls.md`](docs/threading-and-tls.md).
 
 ## Development
 

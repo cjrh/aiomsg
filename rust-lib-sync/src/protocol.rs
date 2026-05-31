@@ -194,6 +194,18 @@ impl FrameDecoder {
         }
     }
 
+    /// Append already-read bytes (e.g. TLS plaintext drained from a rustls
+    /// `Connection`) to the decode buffer. Pair with [`pop`](Self::pop).
+    pub fn extend_from(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// Pop the next complete frame already buffered, without touching any
+    /// socket. Returns `None` when the buffer holds less than a full frame.
+    pub fn pop(&mut self) -> Option<Vec<u8>> {
+        self.take_frame()
+    }
+
     /// Split off the next complete frame from the buffer, if fully present.
     fn take_frame(&mut self) -> Option<Vec<u8>> {
         if self.buf.len() < 4 {
