@@ -1,7 +1,7 @@
 # aiomsg (Rust, async)
 
 Native **async** (tokio) implementation of the [aiomsg protocol](../PROTOCOL.md)
-— a member of the multi-language [aiomsg](../README.rst) family. It interoperates
+— a member of the multi-language [aiomsg](../README.md) family. It interoperates
 on the wire with the Python reference implementation and every other port.
 
 A single `Socket` type multiplexes many TCP connections behind one object, with

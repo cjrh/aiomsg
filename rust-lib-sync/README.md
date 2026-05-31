@@ -2,7 +2,7 @@
 
 Native **synchronous** (threaded) implementation of the
 [aiomsg protocol](../PROTOCOL.md) — a member of the multi-language
-[aiomsg](../README.rst) family. Blocking API backed by background threads, for
+[aiomsg](../README.md) family. Blocking API backed by background threads, for
 code that isn't using an async runtime. Interoperates on the wire with the
 Python reference, the async-Rust crate, and the Go port.
 

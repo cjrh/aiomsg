@@ -1,7 +1,7 @@
 # aiomsg (Go)
 
 Native **Go** implementation of the [aiomsg protocol](../PROTOCOL.md) — a member
-of the multi-language [aiomsg](../README.rst) family. Goroutines and channels,
+of the multi-language [aiomsg](../README.md) family. Goroutines and channels,
 no cgo, stdlib-only. Interoperates on the wire with the Python reference and
 every other port.
 

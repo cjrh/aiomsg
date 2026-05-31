@@ -3,9 +3,9 @@
 Pure-Python smart sockets (like ZMQ) for simpler networking — the **reference
 implementation** of the [aiomsg protocol](../PROTOCOL.md).
 
-This is the Python member of the multi-language [aiomsg](../README.rst) family.
+This is the Python member of the multi-language [aiomsg](../README.md) family.
 For the full design narrative, message-distribution cookbook, and TLS guide, see
-the [top-level README](../README.rst). For the on-the-wire spec shared by every
+the [top-level README](../README.md). For the on-the-wire spec shared by every
 language implementation, see [PROTOCOL.md](../PROTOCOL.md).
 
 ## Install

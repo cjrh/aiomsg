@@ -60,7 +60,7 @@ Rust-sync).
 
 ```
 aiomsg/
-├── README.rst                # Updated: new structure; design principles unchanged
+├── README.md                 # Updated: new structure; design principles unchanged
 ├── DESIGN.md                 # This document
 ├── PROTOCOL.md               # Canonical wire spec (extracted from §5 here)
 ├── LICENSE
@@ -305,7 +305,7 @@ Mechanical, low-risk, done as its own commit(s):
    python-lib` (and add a path filter so it only runs on Python changes).
 4. Add a thin root `justfile` that dispatches (`just python::test`, etc.).
 5. Verify: `cd python-lib && uv run --group test pytest` is green.
-6. Update `README.rst`: new structure + per-language pointers; **Introduction /
+6. Update `README.md`: new structure + per-language pointers; **Introduction /
    design principles unchanged**; replace the provisional protocol section with
    a link to `PROTOCOL.md`.
 7. Apply the §5 typed-envelope change to the Python wire code as a **separate**
