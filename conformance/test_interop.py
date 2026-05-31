@@ -24,6 +24,11 @@ PYTHON_LIB = REPO_ROOT / "python-lib"
 RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
 RUST_SYNC_DIR = REPO_ROOT / "rust-lib-sync"
 GOLANG_DIR = REPO_ROOT / "golang-lib"
+C_DIR = REPO_ROOT / "c-lib"
+CPP_SYNC_DIR = REPO_ROOT / "cpp-lib-sync"
+CPP_ASYNC_DIR = REPO_ROOT / "cpp-lib-async"
+ZIG_DIR = REPO_ROOT / "zig-lib"
+JAVA_DIR = REPO_ROOT / "java-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
 # Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
 # example). It is its own trust anchor, so the same file is both cert and CA.
@@ -62,6 +67,32 @@ SCENARIOS = [
     ("rust-sync", "connect", "rust", "bind", "roundrobin", "at-most-once"),
     ("go", "bind", "rust-sync", "connect", "publish", "at-most-once"),
     ("rust-sync", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # C interop with Python (every role / mode / delivery).
+    ("python", "bind", "c", "connect", "roundrobin", "at-most-once"),
+    ("c", "bind", "python", "connect", "publish", "at-most-once"),
+    ("c", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # C++ (sync) interop with Python.
+    ("python", "bind", "cpp-sync", "connect", "roundrobin", "at-most-once"),
+    ("cpp-sync", "bind", "python", "connect", "publish", "at-most-once"),
+    ("cpp-sync", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # C++ (async) interop with Python.
+    ("python", "bind", "cpp-async", "connect", "roundrobin", "at-most-once"),
+    ("cpp-async", "bind", "python", "connect", "publish", "at-most-once"),
+    ("cpp-async", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # Zig interop with Python.
+    ("python", "bind", "zig", "connect", "roundrobin", "at-most-once"),
+    ("zig", "bind", "python", "connect", "publish", "at-most-once"),
+    ("zig", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # Java interop with Python.
+    ("python", "bind", "java", "connect", "roundrobin", "at-most-once"),
+    ("java", "bind", "python", "connect", "publish", "at-most-once"),
+    ("java", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    # Cross-native interop (no Python in the loop) across the whole family.
+    ("c", "bind", "cpp-async", "connect", "roundrobin", "at-most-once"),
+    ("zig", "bind", "java", "connect", "publish", "at-most-once"),
+    ("cpp-sync", "connect", "go", "bind", "roundrobin", "at-least-once"),
+    ("rust", "bind", "zig", "connect", "roundrobin", "at-most-once"),
+    ("java", "connect", "rust-sync", "bind", "roundrobin", "at-least-once"),
 ]
 
 # The same matrix, but over TLS — proving every implementation speaks the
@@ -75,6 +106,16 @@ TLS_SCENARIOS = [
     ("rust-sync", "bind", "go", "connect", "roundrobin", "at-most-once"),
     ("rust", "bind", "rust-sync", "connect", "roundrobin", "at-most-once"),
     ("python", "connect", "go", "bind", "roundrobin", "at-least-once"),
+    # The C-family ports + Zig + Java all speak TLS over OpenSSL / JSSE; prove
+    # each interoperates with Python over TLS, on both the bind and connect side.
+    ("python", "bind", "c", "connect", "publish", "at-most-once"),
+    ("cpp-sync", "bind", "python", "connect", "roundrobin", "at-most-once"),
+    ("python", "bind", "cpp-async", "connect", "roundrobin", "at-most-once"),
+    ("zig", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "java", "connect", "roundrobin", "at-least-once"),
+    # Cross-native TLS interop.
+    ("c", "connect", "cpp-async", "bind", "roundrobin", "at-most-once"),
+    ("java", "bind", "zig", "connect", "roundrobin", "at-least-once"),
 ]
 
 # Each parametrized case is (scenario tuple, tls flag).
@@ -147,13 +188,89 @@ def go_agent_exe(tmp_path_factory):
     return str(out)
 
 
+def _build_cmake_agent(src_dir):
+    """Configure + build a CMake project's conformance_agent; return its path."""
+    if not _have("cmake"):
+        pytest.skip("cmake not available")
+    build = src_dir / "build"
+    for cmd in (
+        ["cmake", "-B", str(build), "-S", str(src_dir)],
+        ["cmake", "--build", str(build), "--target", "conformance_agent"],
+    ):
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            pytest.fail(f"{' '.join(cmd)} failed:\n{proc.stdout}\n{proc.stderr}")
+    exe = build / "conformance_agent"
+    assert exe.exists(), f"agent not found at {exe}"
+    return str(exe)
+
+
 @pytest.fixture(scope="session")
-def agents(rust_agent_exe, rust_sync_agent_exe, go_agent_exe):
-    """Built native-agent binaries, keyed by language."""
+def c_agent_exe():
+    return _build_cmake_agent(C_DIR)
+
+
+@pytest.fixture(scope="session")
+def cpp_sync_agent_exe():
+    return _build_cmake_agent(CPP_SYNC_DIR)
+
+
+@pytest.fixture(scope="session")
+def cpp_async_agent_exe():
+    return _build_cmake_agent(CPP_ASYNC_DIR)
+
+
+@pytest.fixture(scope="session")
+def zig_agent_exe():
+    """Build the Zig conformance agent once and return its binary path."""
+    if not _have("zig"):
+        pytest.skip("zig not available")
+    proc = subprocess.run(["zig", "build"], cwd=ZIG_DIR, capture_output=True, text=True)
+    if proc.returncode != 0:
+        pytest.fail(f"failed to build zig agent:\n{proc.stderr}")
+    exe = ZIG_DIR / "zig-out" / "bin" / "conformance_agent"
+    assert exe.exists(), f"agent not found at {exe}"
+    return str(exe)
+
+
+@pytest.fixture(scope="session")
+def java_agent_cmd():
+    """Compile the Java agent with javac; return its `java -cp ...` command."""
+    if not _have("javac") or not _have("java"):
+        pytest.skip("java not available")
+    classes = JAVA_DIR / "build" / "classes"
+    classes.mkdir(parents=True, exist_ok=True)
+    sources = [str(p) for p in (JAVA_DIR / "src/main/java/aiomsg").glob("*.java")]
+    proc = subprocess.run(
+        ["javac", "-d", str(classes), *sources], capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        pytest.fail(f"failed to compile java agent:\n{proc.stderr}")
+    return ["java", "-cp", str(classes), "aiomsg.ConformanceAgent"]
+
+
+@pytest.fixture(scope="session")
+def agents(
+    rust_agent_exe,
+    rust_sync_agent_exe,
+    go_agent_exe,
+    c_agent_exe,
+    cpp_sync_agent_exe,
+    cpp_async_agent_exe,
+    zig_agent_exe,
+    java_agent_cmd,
+):
+    """Built native-agent invocations, keyed by language. A value is either a
+    binary path (string) or a full command prefix (list, e.g. for Java)."""
     return {
         "rust": rust_agent_exe,
         "rust-sync": rust_sync_agent_exe,
         "go": go_agent_exe,
+        "c": c_agent_exe,
+        "cpp-sync": cpp_sync_agent_exe,
+        "cpp-async": cpp_async_agent_exe,
+        "zig": zig_agent_exe,
+        "java": java_agent_cmd,
     }
 
 
@@ -194,7 +311,10 @@ def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery, tls=Fal
         ]
     if lang == "python":
         return [sys.executable, str(PY_AGENT), *flags], _python_env()
-    return [exes[lang], *flags], None
+    # A native agent is either a binary path (str) or a command prefix (list).
+    invocation = exes[lang]
+    prefix = invocation if isinstance(invocation, list) else [invocation]
+    return [*prefix, *flags], None
 
 
 def _python_env():
