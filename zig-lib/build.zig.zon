@@ -1,0 +1,15 @@
+.{
+    .name = .aiomsg,
+    .version = "1.0.0",
+    .minimum_zig_version = "0.16.0",
+    // Files shipped when this package is fetched as a dependency.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+        "README.md",
+    },
+    .dependencies = .{},
+    .fingerprint = 0x12c60988258afd29,
+}

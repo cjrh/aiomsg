@@ -4,10 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // The library module. Links libc + OpenSSL: std.Io owns the networking and
-    // concurrency, but the encrypted byte stream goes through OpenSSL (C), which
-    // needs libc and the raw socket fd.
-    const lib_mod = b.createModule(.{
+    // The public library module, consumable by dependents via `zig fetch` +
+    // `dependency("aiomsg", ...).module("aiomsg")`. Links libc + OpenSSL:
+    // std.Io owns the networking and concurrency, but the encrypted byte stream
+    // goes through OpenSSL (C), which needs libc and the raw socket fd.
+    const lib_mod = b.addModule("aiomsg", .{
         .root_source_file = b.path("src/aiomsg.zig"),
         .target = target,
         .optimize = optimize,
@@ -19,18 +20,27 @@ pub fn build(b: *std.Build) void {
     const lib = b.addLibrary(.{ .name = "aiomsg", .root_module = lib_mod });
     b.installArtifact(lib);
 
-    // Conformance agent example.
-    const agent_mod = b.createModule(.{
-        .root_source_file = b.path("examples/conformance_agent.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    agent_mod.addImport("aiomsg", lib_mod);
-    agent_mod.linkSystemLibrary("ssl", .{});
-    agent_mod.linkSystemLibrary("crypto", .{});
-    const agent = b.addExecutable(.{ .name = "conformance_agent", .root_module = agent_mod });
-    b.installArtifact(agent);
+    // Examples + the conformance agent. Each imports the library module and,
+    // because it links OpenSSL through that module, also links libc + ssl/crypto.
+    const exes = [_][]const u8{ "server", "client", "tls", "conformance_agent" };
+    for (exes) |name| {
+        const ex_mod = b.createModule(.{
+            .root_source_file = b.path(b.fmt("examples/{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        ex_mod.addImport("aiomsg", lib_mod);
+        ex_mod.linkSystemLibrary("ssl", .{});
+        ex_mod.linkSystemLibrary("crypto", .{});
+        const exe = b.addExecutable(.{ .name = name, .root_module = ex_mod });
+        b.installArtifact(exe);
+
+        const run_cmd = b.addRunArtifact(exe);
+        if (b.args) |a| run_cmd.addArgs(a);
+        const run_step = b.step(b.fmt("run-{s}", .{name}), b.fmt("Run the {s} example", .{name}));
+        run_step.dependOn(&run_cmd.step);
+    }
 
     // Tests: protocol unit tests + the integration test (TCP + TLS).
     const test_step = b.step("test", "Run all tests");
