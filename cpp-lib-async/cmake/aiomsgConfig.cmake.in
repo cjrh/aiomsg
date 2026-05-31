@@ -1,0 +1,20 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(OpenSSL)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/aiomsgTargets.cmake")
+
+# This port's public header includes <asio/...>, so consumers need standalone
+# Asio's headers on their include path. They are not vendored into the install;
+# locate them here (override with -DASIO_INCLUDE_DIR=... if installed unusually).
+if(NOT ASIO_INCLUDE_DIR)
+    find_path(ASIO_INCLUDE_DIR asio.hpp)
+endif()
+if(NOT ASIO_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "aiomsg (C++ async) requires standalone Asio headers (asio.hpp), which were not found. "
+        "Install Asio or set ASIO_INCLUDE_DIR.")
+endif()
+target_include_directories(aiomsg::aiomsg INTERFACE "${ASIO_INCLUDE_DIR}")

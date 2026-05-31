@@ -1,0 +1,5 @@
+# Built binaries (examples / conformance agent are built to temp dirs by the
+# conformance runner, but ignore any stray local builds).
+/conformance_agent
+/server
+/client

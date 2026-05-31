@@ -1,0 +1,24 @@
+# aiomsg (C++ sync) — build & test
+
+build:
+    cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build
+
+test: build
+    ctest --test-dir build --output-on-failure
+
+# Build and run the two-process demo (server in the background, then client).
+examples: build
+    ./build/server & echo $! > /tmp/aiomsg-cppsync-server.pid
+    sleep 1
+    timeout 3 ./build/client || true
+    kill $(cat /tmp/aiomsg-cppsync-server.pid) 2>/dev/null || true
+
+# Stage an install tree under ./dist (header, static lib, pkg-config, CMake config).
+install prefix="dist":
+    cmake -B build -S . -DCMAKE_INSTALL_PREFIX={{prefix}}
+    cmake --build build
+    cmake --install build
+
+clean:
+    rm -rf build dist

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "aiomsg"
+version = "2019.12.3"
+description = "Socket-based abstraction for messaging patterns"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Caleb Hattingh", email = "caleb.hattingh@gmail.com" },
+]
+keywords = ["asyncio", "socket", "network", "messaging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/cjrh/aiomsg"
+
+[project.optional-dependencies]
+doc = ["sphinx"]
+
+[tool.uv.build-backend]
+module-root = ""
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-cov",
+    "coverage",
+    "portpicker",
+    "pytest-benchmark",
+]
+lint = [
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Mirror the previous flake8 baseline (E + F) and ignore the same rules
+# that .flake8 used to suppress.
+ignore = [
+    "E501",  # line too long
+    "F541",  # f-string without placeholders
+    "E741",  # ambiguous variable name (e.g. `l`)
+]

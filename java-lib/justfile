@@ -1,0 +1,22 @@
+# aiomsg (Java) — build & test
+#
+# Everything runs through the committed Gradle wrapper (./gradlew), so no system
+# Gradle install is needed. The conformance suite compiles the agent with plain
+# javac (see ../conformance), independent of this build.
+
+build:
+    ./gradlew build
+
+test:
+    ./gradlew test
+
+# Run an example: `just run Server`, `just run Client`, or `just run Tls`.
+run example:
+    ./gradlew run{{example}}
+
+# Run the conformance agent, e.g.: just agent --role bind --port 25000 ...
+agent *ARGS:
+    ./gradlew run --args="{{ARGS}}" -q
+
+clean:
+    ./gradlew clean

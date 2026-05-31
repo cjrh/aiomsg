@@ -1,42 +1,40 @@
-# Common dev operations for aiomsg.
-# Run `just` (or `just --list`) to see available recipes.
+# Top-level dispatch for the multi-language aiomsg repo.
+# Each language implementation lives in its own subdirectory with its own
+# justfile exposing a uniform `test` recipe. Run `just` to list recipes.
 
 # Show available recipes.
 default:
     @just --list
 
-# Sync the venv with all locked dev/test dependencies.
-sync:
-    uv sync --group test --group lint
+# Run the Python implementation's test suite.
+test-python:
+    cd python-lib && just test
 
-# Run the test suite.
-test:
-    uv run pytest tests/
+# Run the async Rust implementation's test suite.
+test-rust-async:
+    cd rust-lib-async && just test
 
-# Run tests with coverage (lcov output for coveralls).
-coverage:
-    uv run pytest --cov=aiomsg --cov-report=lcov:coverage.lcov tests/
+# Run the sync Rust implementation's test suite.
+test-rust-sync:
+    cd rust-lib-sync && just test
 
-# Lint with ruff.
-lint:
-    uv run --group lint ruff check aiomsg tests
+# Run the Go implementation's test suite.
+test-golang:
+    cd golang-lib && just test
 
-# Auto-format with ruff.
-fmt:
-    uv run --group lint ruff format aiomsg tests
+# Run the cross-language conformance (interop) suite.
+test-conformance:
+    uv run --project python-lib --group test pytest conformance/ -v
 
-# Bump + tag + push a release. Pushing a v* tag triggers PyPI publish.
-# Usage: `just release patch` (or minor / major).
-release *bump:
+# Run every implementation's test suite that currently exists.
+test-all:
     #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "error: working tree is dirty; commit or stash first" >&2
-        exit 1
-    fi
-    uv version --bump {{bump}}
-    new_version=$(uv version --short)
-    git commit -am "Bump to ${new_version}"
-    git tag "v${new_version}"
-    git push --follow-tags
-    echo "released v${new_version}"
+    set -uo pipefail
+    rc=0
+    for d in python-lib rust-lib-async rust-lib-sync golang-lib; do
+        if [[ -f "$d/justfile" ]]; then
+            echo "=== $d ==="
+            (cd "$d" && just test) || rc=1
+        fi
+    done
+    exit $rc

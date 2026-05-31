@@ -1,0 +1,39 @@
+name: C++ CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'cpp-lib-sync/**'
+      - 'cpp-lib-async/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/cpp.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'cpp-lib-sync/**'
+      - 'cpp-lib-async/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/cpp.yml'
+
+jobs:
+  test:
+    name: Build & test (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # cpp-lib-async fetches standalone Asio via CMake FetchContent on first
+        # configure; cpp-lib-sync has no extra dependency.
+        dir: [cpp-lib-sync, cpp-lib-async]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OpenSSL headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - uses: extractions/setup-just@v3
+      - name: Test
+        run: just test
+        working-directory: ${{ matrix.dir }}

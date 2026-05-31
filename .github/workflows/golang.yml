@@ -1,0 +1,36 @@
+name: Go CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'golang-lib/**'
+      - '.github/workflows/golang.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'golang-lib/**'
+      - '.github/workflows/golang.yml'
+
+defaults:
+  run:
+    working-directory: golang-lib
+
+jobs:
+  test:
+    name: Test, vet, fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...

@@ -1,0 +1,40 @@
+[package]
+name = "aiomsg"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Native async (tokio) implementation of the aiomsg smart-socket protocol"
+license = "Apache-2.0"
+repository = "https://github.com/cjrh/aiomsg"
+readme = "README.md"
+keywords = ["asyncio", "socket", "network", "messaging", "tokio"]
+categories = ["network-programming", "asynchronous"]
+
+[features]
+default = ["tls"]
+# Optional TLS via rustls (ring crypto backend, no OpenSSL / C toolchain).
+tls = ["dep:tokio-rustls"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros"] }
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+async-stream = "0.3"
+tokio-stream = "0.1"
+tracing = "0.1"
+# rustls with the pure-Rust `ring` provider only. rustls's default features pull
+# in aws-lc-rs, which needs cmake + a C compiler; we deliberately avoid that.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "io-util", "macros", "test-util"] }
+tokio-stream = "0.1"
+# Test/example helpers: generate self-signed certs and read PEM files. Pure Rust.
+rcgen = "0.13"
+rustls-pemfile = "2"
+
+# The TLS demo only builds when the `tls` feature is on.
+[[example]]
+name = "tls"
+required-features = ["tls"]

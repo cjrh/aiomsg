@@ -1,0 +1,14 @@
+# aiomsg (Zig) — build & test
+
+build:
+    zig build
+
+test:
+    zig build test
+
+# Run an example: `just run server`, `just run client`, or `just run tls`.
+run example *args:
+    zig build run-{{example}} {{ if args == "" { "" } else { "-- " + args } }}
+
+clean:
+    rm -rf .zig-cache zig-out
