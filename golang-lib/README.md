@@ -1,6 +1,6 @@
 # aiomsg (Go)
 
-Native **Go** implementation of the [aiomsg protocol](../PROTOCOL.md) — a member
+Native **Go** implementation of the [aiomsg protocol](../PROTOCOL.md), a member
 of the multi-language [aiomsg](../README.md) family. Goroutines and channels,
 no cgo, stdlib-only. Interoperates on the wire with the Python reference and
 every other port.
@@ -52,7 +52,7 @@ See `examples/server` and `examples/client` (`go run ./examples/server`).
 
 ## TLS
 
-TLS uses the standard library's `crypto/tls` — no extra dependencies. Pass a
+TLS uses the standard library's `crypto/tls` with no extra dependencies. Pass a
 `*tls.Config` to `BindTLS` / `ConnectTLS`. The bind side presents a certificate;
 the connect side verifies it (put the expected name in `cfg.ServerName` and the
 trusted roots in `cfg.RootCAs`):
