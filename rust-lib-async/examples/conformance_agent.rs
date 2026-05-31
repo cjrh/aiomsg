@@ -15,6 +15,10 @@
 //!   --delivery  at-most-once | at-least-once   (default at-most-once)
 //!   --identity  32 hex chars (16 bytes)         (optional)
 //!   --linger    seconds a source waits after sending (default 1.0)
+//!   --tls       (flag) wrap the transport in TLS
+//!   --tls-cert / --tls-key   server cert + key PEM (bind side)
+//!   --tls-ca                 trusted CA PEM (connect side)
+//!   --tls-server-name        name to verify (connect side; default = host)
 //!
 //! A `sink` prints each received message (utf-8) on its own line and exits
 //! after `count` messages.
@@ -77,12 +81,19 @@ async fn run(args: HashMap<String, String>) -> aiomsg::Result<()> {
     let sock = builder.build();
 
     let addr: std::net::SocketAddr = format!("{host}:{port}").parse().expect("valid addr");
-    match role {
-        "bind" => {
+    let tls = args.get("tls").map(|v| v == "true").unwrap_or(false);
+    match (role, tls) {
+        ("bind", false) => {
             sock.bind(addr).await?;
         }
-        _ => {
+        ("bind", true) => {
+            bind_tls(&sock, addr, &args).await?;
+        }
+        (_, false) => {
             sock.connect(addr).await?;
+        }
+        (_, true) => {
+            connect_tls(&sock, addr, host, &args).await?;
         }
     }
 
@@ -132,4 +143,93 @@ fn parse_identity(hex: &str) -> Identity {
         }
     }
     id
+}
+
+#[cfg(feature = "tls")]
+async fn bind_tls(
+    sock: &Socket,
+    addr: std::net::SocketAddr,
+    args: &HashMap<String, String>,
+) -> aiomsg::Result<()> {
+    let cert = args.get("tls-cert").expect("--tls-cert required");
+    let key = args.get("tls-key").expect("--tls-key required");
+    sock.bind_tls(addr, tls::server_config(cert, key)).await?;
+    Ok(())
+}
+
+#[cfg(feature = "tls")]
+async fn connect_tls(
+    sock: &Socket,
+    addr: std::net::SocketAddr,
+    host: &str,
+    args: &HashMap<String, String>,
+) -> aiomsg::Result<()> {
+    let ca = args.get("tls-ca").expect("--tls-ca required");
+    let name = args
+        .get("tls-server-name")
+        .map(String::as_str)
+        .unwrap_or(host);
+    sock.connect_tls(addr, name.to_string(), tls::client_config(ca))
+        .await?;
+    Ok(())
+}
+
+#[cfg(not(feature = "tls"))]
+async fn bind_tls(
+    _: &Socket,
+    _: std::net::SocketAddr,
+    _: &HashMap<String, String>,
+) -> aiomsg::Result<()> {
+    panic!("--tls requires the `tls` feature");
+}
+
+#[cfg(not(feature = "tls"))]
+async fn connect_tls(
+    _: &Socket,
+    _: std::net::SocketAddr,
+    _: &str,
+    _: &HashMap<String, String>,
+) -> aiomsg::Result<()> {
+    panic!("--tls requires the `tls` feature");
+}
+
+#[cfg(feature = "tls")]
+mod tls {
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::sync::Arc;
+
+    use aiomsg::rustls::crypto::ring;
+    use aiomsg::rustls::{ClientConfig, RootCertStore, ServerConfig};
+
+    pub fn server_config(cert_pem: &str, key_pem: &str) -> Arc<ServerConfig> {
+        let certs = rustls_pemfile::certs(&mut BufReader::new(File::open(cert_pem).unwrap()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = rustls_pemfile::private_key(&mut BufReader::new(File::open(key_pem).unwrap()))
+            .unwrap()
+            .expect("no private key in PEM");
+        Arc::new(
+            ServerConfig::builder_with_provider(Arc::new(ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        )
+    }
+
+    pub fn client_config(ca_pem: &str) -> Arc<ClientConfig> {
+        let mut roots = RootCertStore::empty();
+        for cert in rustls_pemfile::certs(&mut BufReader::new(File::open(ca_pem).unwrap())) {
+            roots.add(cert.unwrap()).unwrap();
+        }
+        Arc::new(
+            ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        )
+    }
 }

@@ -25,6 +25,11 @@ RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
 RUST_SYNC_DIR = REPO_ROOT / "rust-lib-sync"
 GOLANG_DIR = REPO_ROOT / "golang-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
+# Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
+# example). It is its own trust anchor, so the same file is both cert and CA.
+CERTS = REPO_ROOT / "conformance" / "certs"
+TLS_CERT = CERTS / "cert.pem"
+TLS_KEY = CERTS / "key.pem"
 
 COUNT = 10
 PREFIX = "m"
@@ -59,10 +64,31 @@ SCENARIOS = [
     ("rust-sync", "connect", "python", "bind", "roundrobin", "at-least-once"),
 ]
 
+# The same matrix, but over TLS — proving every implementation speaks the
+# protocol identically whether the transport is plain TCP or rustls/crypto-tls/
+# OpenSSL. Covers each language on both the bind (TLS server) and connect (TLS
+# client) side, both Rust crates against each other, and one at-least-once path.
+TLS_SCENARIOS = [
+    ("python", "bind", "rust", "connect", "publish", "at-most-once"),
+    ("rust", "bind", "python", "connect", "roundrobin", "at-most-once"),
+    ("go", "bind", "rust-sync", "connect", "publish", "at-most-once"),
+    ("rust-sync", "bind", "go", "connect", "roundrobin", "at-most-once"),
+    ("rust", "bind", "rust-sync", "connect", "roundrobin", "at-most-once"),
+    ("python", "connect", "go", "bind", "roundrobin", "at-least-once"),
+]
 
-def _scenario_id(s):
+# Each parametrized case is (scenario tuple, tls flag).
+ALL_SCENARIOS = [(s, False) for s in SCENARIOS] + [(s, True) for s in TLS_SCENARIOS]
+
+
+def _scenario_id(case):
+    s, tls = case
     src_lang, src_role, sink_lang, sink_role, mode, delivery = s
-    return f"{src_lang}-{src_role}-source__{sink_lang}-{sink_role}-sink__{mode}__{delivery}"
+    transport = "tls" if tls else "tcp"
+    return (
+        f"{src_lang}-{src_role}-source__{sink_lang}-{sink_role}-sink"
+        f"__{mode}__{delivery}__{transport}"
+    )
 
 
 def _build_cargo_example(crate_dir):
@@ -143,7 +169,7 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery):
+def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery, tls=False):
     flags = [
         "--role", role,
         "--host", "127.0.0.1",
@@ -155,6 +181,17 @@ def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery):
         "--delivery", delivery,
         "--linger", SOURCE_LINGER,
     ]
+    if tls:
+        # The cert is its own trust anchor: it is both the server cert (bind
+        # side) and the trusted CA (connect side). Each agent uses the flags
+        # relevant to its role; the server name defaults to the host (the cert
+        # has an IP SAN for 127.0.0.1).
+        flags += [
+            "--tls", "true",
+            "--tls-cert", str(TLS_CERT),
+            "--tls-key", str(TLS_KEY),
+            "--tls-ca", str(TLS_CERT),
+        ]
     if lang == "python":
         return [sys.executable, str(PY_AGENT), *flags], _python_env()
     return [exes[lang], *flags], None
@@ -175,20 +212,25 @@ def _launch(cmd_env):
     )
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=[_scenario_id(s) for s in SCENARIOS])
-def test_interop(agents, scenario):
+@pytest.mark.parametrize(
+    "case", ALL_SCENARIOS, ids=[_scenario_id(c) for c in ALL_SCENARIOS]
+)
+def test_interop(agents, case):
+    scenario, tls = case
     src_lang, src_role, sink_lang, sink_role, send_mode, delivery = scenario
+    if tls and not TLS_CERT.exists():
+        pytest.skip("shared test cert missing; run the gen_test_certs example")
     port = _free_port()
 
     source_cmd = _agent_cmd(
         src_lang, agents,
         role=src_role, behavior="source", port=port,
-        send_mode=send_mode, delivery=delivery,
+        send_mode=send_mode, delivery=delivery, tls=tls,
     )
     sink_cmd = _agent_cmd(
         sink_lang, agents,
         role=sink_role, behavior="sink", port=port,
-        send_mode=send_mode, delivery=delivery,
+        send_mode=send_mode, delivery=delivery, tls=tls,
     )
 
     # The binding side must come up first.

@@ -8,6 +8,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -28,6 +30,11 @@ func main() {
 	delivery := flag.String("delivery", "at-most-once", "at-most-once | at-least-once")
 	identityHex := flag.String("identity", "", "32 hex chars (16 bytes)")
 	linger := flag.Float64("linger", 1.0, "seconds a source waits after sending")
+	useTLS := flag.String("tls", "false", "wrap the transport in TLS")
+	tlsCert := flag.String("tls-cert", "", "server cert PEM (bind side)")
+	tlsKey := flag.String("tls-key", "", "server key PEM (bind side)")
+	tlsCA := flag.String("tls-ca", "", "trusted CA PEM (connect side)")
+	tlsServerName := flag.String("tls-server-name", "", "name to verify (connect side; default = host)")
 	flag.Parse()
 
 	var opts []aiomsg.Option
@@ -54,16 +61,25 @@ func main() {
 	defer sock.Close()
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
-	if *role == "bind" {
-		if _, err := sock.Bind(addr); err != nil {
-			fmt.Fprintln(os.Stderr, "bind failed:", err)
-			os.Exit(1)
+	tlsOn := *useTLS == "true"
+	var err error
+	switch {
+	case *role == "bind" && tlsOn:
+		_, err = sock.BindTLS(addr, serverTLSConfig(*tlsCert, *tlsKey))
+	case *role == "bind":
+		_, err = sock.Bind(addr)
+	case tlsOn:
+		name := *tlsServerName
+		if name == "" {
+			name = *host
 		}
-	} else {
-		if err := sock.Connect(addr); err != nil {
-			fmt.Fprintln(os.Stderr, "connect failed:", err)
-			os.Exit(1)
-		}
+		err = sock.ConnectTLS(addr, clientTLSConfig(*tlsCA, name))
+	default:
+		err = sock.Connect(addr)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, *role, "failed:", err)
+		os.Exit(1)
 	}
 
 	lingerDur := time.Duration(*linger * float64(time.Second))
@@ -95,4 +111,27 @@ func main() {
 			w.Flush()
 		}
 	}
+}
+
+func serverTLSConfig(certPath, keyPath string) *tls.Config {
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "load cert:", err)
+		os.Exit(1)
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+}
+
+func clientTLSConfig(caPath, serverName string) *tls.Config {
+	pem, err := os.ReadFile(caPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read CA:", err)
+		os.Exit(1)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		fmt.Fprintln(os.Stderr, "no certs found in CA PEM")
+		os.Exit(1)
+	}
+	return &tls.Config{RootCAs: pool, ServerName: serverName, MinVersion: tls.VersionTLS12}
 }

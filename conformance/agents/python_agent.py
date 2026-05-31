@@ -9,11 +9,32 @@ A ``sink`` prints each received message (utf-8) on its own line and exits after
 ``--count`` messages.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
+import ssl
 import sys
 
 from aiomsg import DeliveryGuarantee, SendMode, Søcket
+
+
+def build_ssl(args: argparse.Namespace) -> ssl.SSLContext | None:
+    """A standard library SSLContext for this role, or None for plain TCP.
+
+    The bind side presents the certificate; the connect side verifies it. The
+    shared test certificate carries an IP SAN for 127.0.0.1, so the default
+    hostname check (against the connect host) passes — no special casing needed.
+    """
+    if args.tls.lower() != "true":
+        return None
+    if args.role == "bind":
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(args.tls_cert, args.tls_key)
+    else:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.load_verify_locations(args.tls_ca)
+    return ctx
 
 
 async def main(args: argparse.Namespace) -> None:
@@ -24,14 +45,15 @@ async def main(args: argparse.Namespace) -> None:
         else DeliveryGuarantee.AT_MOST_ONCE
     )
     identity = bytes.fromhex(args.identity) if args.identity else None
+    ssl_context = build_ssl(args)
 
     async with Søcket(
         send_mode=send_mode, delivery_guarantee=delivery, identity=identity
     ) as sock:
         if args.role == "bind":
-            await sock.bind(args.host, args.port)
+            await sock.bind(args.host, args.port, ssl_context=ssl_context)
         else:
-            await sock.connect(args.host, args.port)
+            await sock.connect(args.host, args.port, ssl_context=ssl_context)
 
         if args.behavior == "source":
             for i in range(args.count):
@@ -63,6 +85,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--delivery", default="at-most-once")
     p.add_argument("--identity", default=None)
     p.add_argument("--linger", type=float, default=1.0)
+    p.add_argument("--tls", default="false")
+    p.add_argument("--tls-cert", dest="tls_cert", default=None)
+    p.add_argument("--tls-key", dest="tls_key", default=None)
+    p.add_argument("--tls-ca", dest="tls_ca", default=None)
     return p.parse_args()
 
 

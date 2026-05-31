@@ -38,9 +38,12 @@ fn main() {
     let sock = builder.build();
 
     let addr = format!("{host}:{port}");
-    let ok = match role {
-        "bind" => sock.bind(&addr).map(|_| ()),
-        _ => sock.connect(&addr),
+    let tls = arg(&args, "tls", "false") == "true";
+    let ok = match (role, tls) {
+        ("bind", false) => sock.bind(&addr).map(|_| ()),
+        ("bind", true) => bind_tls(&sock, &addr, &args).map(|_| ()),
+        (_, false) => sock.connect(&addr),
+        (_, true) => connect_tls(&sock, &addr, host, &args),
     };
     if let Err(e) = ok {
         eprintln!("{role} failed: {e}");
@@ -109,4 +112,75 @@ fn parse_identity(hex: &str) -> Identity {
         }
     }
     id
+}
+
+#[cfg(feature = "tls")]
+fn bind_tls(sock: &Socket, addr: &str, args: &HashMap<String, String>) -> aiomsg::Result<()> {
+    let cert = arg(args, "tls-cert", "");
+    let key = arg(args, "tls-key", "");
+    sock.bind_tls(addr, tls::server_config(cert, key))?;
+    Ok(())
+}
+
+#[cfg(feature = "tls")]
+fn connect_tls(
+    sock: &Socket,
+    addr: &str,
+    host: &str,
+    args: &HashMap<String, String>,
+) -> aiomsg::Result<()> {
+    let ca = arg(args, "tls-ca", "");
+    let name = arg(args, "tls-server-name", host).to_string();
+    sock.connect_tls(addr, name, tls::client_config(ca))
+}
+
+#[cfg(not(feature = "tls"))]
+fn bind_tls(_: &Socket, _: &str, _: &HashMap<String, String>) -> aiomsg::Result<()> {
+    panic!("--tls requires the `tls` feature");
+}
+
+#[cfg(not(feature = "tls"))]
+fn connect_tls(_: &Socket, _: &str, _: &str, _: &HashMap<String, String>) -> aiomsg::Result<()> {
+    panic!("--tls requires the `tls` feature");
+}
+
+#[cfg(feature = "tls")]
+mod tls {
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::sync::Arc;
+
+    use aiomsg::rustls::crypto::ring;
+    use aiomsg::rustls::{ClientConfig, RootCertStore, ServerConfig};
+
+    pub fn server_config(cert_pem: &str, key_pem: &str) -> Arc<ServerConfig> {
+        let certs = rustls_pemfile::certs(&mut BufReader::new(File::open(cert_pem).unwrap()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = rustls_pemfile::private_key(&mut BufReader::new(File::open(key_pem).unwrap()))
+            .unwrap()
+            .expect("no private key in PEM");
+        Arc::new(
+            ServerConfig::builder_with_provider(Arc::new(ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        )
+    }
+
+    pub fn client_config(ca_pem: &str) -> Arc<ClientConfig> {
+        let mut roots = RootCertStore::empty();
+        for cert in rustls_pemfile::certs(&mut BufReader::new(File::open(ca_pem).unwrap())) {
+            roots.add(cert.unwrap()).unwrap();
+        }
+        Arc::new(
+            ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        )
+    }
 }
