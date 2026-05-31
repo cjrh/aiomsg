@@ -1,8 +1,10 @@
 name: Conformance
 
 # Cross-language interop: builds each implementation's test agent and asserts
-# they speak the one wire protocol. Runs when any implementation or the
-# conformance harness itself changes.
+# they speak the one wire protocol. The suite is single-host — one Python
+# process spawns every language's agent as a local subprocess and they talk over
+# loopback (TCP + TLS) — so every toolchain is installed on the one runner.
+# Runs when any implementation or the conformance harness itself changes.
 on:
   push:
     branches:
@@ -12,6 +14,11 @@ on:
       - 'rust-lib-async/**'
       - 'rust-lib-sync/**'
       - 'golang-lib/**'
+      - 'c-lib/**'
+      - 'cpp-lib-sync/**'
+      - 'cpp-lib-async/**'
+      - 'zig-lib/**'
+      - 'java-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
   pull_request:
@@ -22,6 +29,11 @@ on:
       - 'rust-lib-async/**'
       - 'rust-lib-sync/**'
       - 'golang-lib/**'
+      - 'c-lib/**'
+      - 'cpp-lib-sync/**'
+      - 'cpp-lib-async/**'
+      - 'zig-lib/**'
+      - 'java-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
 
@@ -29,15 +41,28 @@ jobs:
   interop:
     name: Cross-language interop
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # OpenSSL headers for the C / C++ / Zig agents (CMake + gcc/g++ and zig
+      # build are provided by the runner image and the actions below).
+      - name: Install OpenSSL headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      # The pytest fixtures build each agent on demand (cargo / go build / cmake
+      # / zig build / javac) and then exercise every cross-language pairing.
       - name: Run conformance suite
         run: uv run --project python-lib --group test pytest conformance/ -v

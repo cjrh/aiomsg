@@ -1,0 +1,40 @@
+name: Java CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'java-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/java.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'java-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/java.yml'
+
+defaults:
+  run:
+    working-directory: java-lib
+
+jobs:
+  test:
+    name: Build & test (Gradle/JUnit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      # Java 21 is the floor (virtual threads); the build targets release 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: extractions/setup-just@v3
+      # `just test` runs `./gradlew test` (the committed wrapper fetches Gradle):
+      # the JUnit 5 protocol unit tests + the in-process TCP/TLS integration test.
+      - name: Test
+        run: just test

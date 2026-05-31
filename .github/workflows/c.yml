@@ -1,0 +1,36 @@
+name: C CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'c-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/c.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'c-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/c.yml'
+
+defaults:
+  run:
+    working-directory: c-lib
+
+jobs:
+  test:
+    name: Build & test (CMake/CTest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OpenSSL headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - uses: extractions/setup-just@v3
+      # `just test` configures with CMake, builds, and runs CTest (protocol unit
+      # tests + the in-process TCP/TLS integration test) — exactly as run locally.
+      - name: Test
+        run: just test
