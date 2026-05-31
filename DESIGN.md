@@ -265,13 +265,29 @@ The canonical API (§4) realized natively. Same shape, different spelling.
 - Errors: a `thiserror` enum; no panics on peer misbehaviour.
 
 ### 6.3 Rust — sync (`rust-lib-sync`, later phase)
-- `std::net::{TcpListener, TcpStream}` + a small thread pool. TLS: `rustls`.
-- Blocking `send`/`recv`; `messages()` returns an `Iterator<Item = Bytes>`.
-- Internals: a background reader thread and writer thread per connection plus a
-  central router thread, communicating via `std::sync::mpsc` /
-  `crossbeam-channel`. Same broker shape as async, threads instead of tasks.
+- `std::net::{TcpListener, TcpStream}` + threads. TLS: `rustls` with the
+  pure-Rust `ring` provider (no OpenSSL / C toolchain), behind a default-on
+  `tls` feature.
+- Blocking `send`/`recv`/`recv_timeout`; `messages()` returns an
+  `Iterator<Item = Bytes>`. A cloned `Socket` (it is `Send + Sync`) is how you
+  send from a different thread than you receive on. (No callback receive API —
+  kept consistent with the rest of the family and the reference's "no callback
+  handlers" ergonomic.)
+- Internals: a central broker thread plus **one thread per connection** that
+  interleaves reading and writing, communicating via `std::sync::mpsc`. The
+  single-thread-per-connection model (rather than separate reader/writer
+  threads) is required because a TLS connection is one stateful object that
+  cannot be split across two threads; the thread sets a short socket read
+  timeout and, each loop, drains the outbound queue, heartbeats if idle, then
+  reads via a partial-read-safe `FrameDecoder`. Plain TCP uses the same path.
+- **Trade-off (accepted):** an outbound message sent while a connection is
+  otherwise idle waits up to one poll interval (`POLL_INTERVAL`, 50 ms). This is
+  intrinsic to blocking threads + a non-splittable TLS stream — eliminating it
+  needs a readiness reactor (async, or `mio`), which would defeat the crate's
+  "no async runtime" purpose. See §10.
 - **Independent** of the async crate — it reimplements the (simple) framing and
-  envelope logic itself; no shared core crate.
+  envelope logic itself; no shared core crate, and explicitly **not** a
+  `block_on` wrapper over `rust-lib-async`.
 
 ### 6.4 Go (`golang-lib`, later phase)
 - Idiomatic **goroutines + channels**. Functional options:
@@ -376,13 +392,28 @@ Resolved:
    wait for acks from a fan-out broadcast).
 3. **Shared Rust core** — **rejected.** The two Rust crates are fully
    independent; the protocol is simple enough to reimplement in each.
+4. **`rust-lib-sync` as a `block_on` wrapper over `rust-lib-async`** —
+   **rejected.** It would erase the sync crate's outbound poll latency (a
+   reactor wakes precisely on readiness) and cut code, but it pulls a tokio
+   runtime into a crate whose entire reason to exist is to be runtime-free,
+   maximises coupling (the opposite of decision 3), adds `block_on` reentrancy
+   hazards, and makes the sync↔async conformance test near-tautological. Kept
+   independent and threaded.
+5. **Sync outbound poll latency (≤50 ms when idle)** — **accepted.** Intrinsic
+   to blocking threads + a non-splittable TLS stream. Cheap mitigations (smaller
+   interval) or a `mio` reactor remain available if zero-latency-at-scale ever
+   becomes a requirement; not pursued for the reference impl.
+6. **Callback receive API for the sync crate** — **rejected.** Kept
+   `recv()`/`messages()` for consistency with the rest of the family and the
+   reference's "no callback handlers" ergonomic; avoids Rust `Fn + Send` capture
+   and broker re-entrancy sharp edges.
 
 Open / proposed:
-4. **Protocol version policy** — `HELLO` carries a version byte; proposal is
+7. **Protocol version policy** — `HELLO` carries a version byte; proposal is
    strict reject-on-mismatch for v1.
-5. **Heartbeat tunability across languages** — proposal: fixed 5s/15s defaults,
+8. **Heartbeat tunability across languages** — proposal: fixed 5s/15s defaults,
    locally overridable, not negotiated in `HELLO` for v1.
-6. **Reliability persistence** — out of scope for v1 (matches reference); noted
+9. **Reliability persistence** — out of scope for v1 (matches reference); noted
    as a future protocol extension.
 
 ---
