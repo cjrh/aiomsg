@@ -399,10 +399,20 @@ Resolved:
    maximises coupling (the opposite of decision 3), adds `block_on` reentrancy
    hazards, and makes the sync↔async conformance test near-tautological. Kept
    independent and threaded.
-5. **Sync outbound poll latency (≤50 ms when idle)** — **accepted.** Intrinsic
-   to blocking threads + a non-splittable TLS stream. Cheap mitigations (smaller
-   interval) or a `mio` reactor remain available if zero-latency-at-scale ever
-   becomes a requirement; not pursued for the reference impl.
+5. **Sync outbound poll latency (≤50 ms when idle)** — **accepted in the
+   baseline `rust-lib-sync`**, and **explored away in two experiment crates:**
+   - `rust-sync-split` — keep blocking threads, but recognise the TCP fd is
+     duplex-splittable; share only the rustls `Connection` behind a short-held
+     `Mutex` (the *"separate socket I/O from TLS state"* strategy). Reader and
+     writer threads, zero added latency. Simplest; recommended if the baseline's
+     latency ever matters.
+   - `rust-sync-chan` — a per-connection epoll reactor (`polling` crate) + a
+     notifying sender. Zero latency, one thread/connection, but a hand-rolled
+     event loop ("async-in-disguise"); its real payoff (a single global reactor
+     for many connections) is left as a follow-up. Confirms the research's view
+     that for thread-per-connection code, `split` is preferable.
+
+   Both interoperate on the wire with the whole family (conformance suite).
 6. **Callback receive API for the sync crate** — **rejected.** Kept
    `recv()`/`messages()` for consistency with the rest of the family and the
    reference's "no callback handlers" ergonomic; avoids Rust `Fn + Send` capture
