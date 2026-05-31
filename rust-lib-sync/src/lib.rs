@@ -34,8 +34,14 @@ use std::time::Duration;
 pub use bytes::Bytes;
 pub use protocol::{Identity, MsgId};
 
+/// Re-export of the exact `rustls` version this crate links, so building a
+/// [`rustls::ServerConfig`]/[`rustls::ClientConfig`] for [`Socket::bind_tls`]/
+/// [`Socket::connect_tls`] can never hit a version mismatch.
+#[cfg(feature = "tls")]
+pub use rustls;
+
 use broker::{Broker, Command};
-use conn::{ReconnectDelay, Registry};
+use conn::{Acceptor, Connector, ReconnectDelay, Registry};
 
 /// How a socket distributes each sent message across its connected peers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +65,11 @@ pub enum Error {
     Closed,
     #[error("could not resolve address")]
     BadAddress,
+    /// The string passed to [`Socket::connect_tls`] is not a valid DNS name or
+    /// IP address.
+    #[cfg(feature = "tls")]
+    #[error("invalid TLS server name")]
+    InvalidServerName,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -168,6 +179,24 @@ impl Socket {
 
     /// Listen on `addr`, returning the bound local address (useful with port 0).
     pub fn bind<A: ToSocketAddrs>(&self, addr: A) -> Result<SocketAddr> {
+        self.bind_with(addr, Acceptor::Plain)
+    }
+
+    /// Like [`bind`](Socket::bind), but every accepted connection is wrapped in
+    /// a TLS server handshake using `config`. Build the [`rustls::ServerConfig`]
+    /// with your certificate chain and private key (see the crate's `tls`
+    /// example). The wire protocol is identical over TLS, so a TLS socket
+    /// interoperates with any other implementation's TLS socket.
+    #[cfg(feature = "tls")]
+    pub fn bind_tls<A: ToSocketAddrs>(
+        &self,
+        addr: A,
+        config: Arc<rustls::ServerConfig>,
+    ) -> Result<SocketAddr> {
+        self.bind_with(addr, Acceptor::Tls(config))
+    }
+
+    fn bind_with<A: ToSocketAddrs>(&self, addr: A, acceptor: Acceptor) -> Result<SocketAddr> {
         let listener = TcpListener::bind(addr)?;
         let local_addr = listener.local_addr()?;
 
@@ -177,7 +206,7 @@ impl Socket {
         let registry = self.inner.registry.clone();
 
         let handle = std::thread::spawn(move || {
-            conn::accept_loop(listener, cmd_tx, identity, shutdown, registry);
+            conn::accept_loop(listener, acceptor, cmd_tx, identity, shutdown, registry);
         });
         self.inner.threads.lock().unwrap().push(handle);
         Ok(local_addr)
@@ -186,6 +215,26 @@ impl Socket {
     /// Connect to a peer at `addr`, reconnecting for the life of the socket.
     /// May be called multiple times (and combined with [`bind`](Socket::bind)).
     pub fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<()> {
+        self.connect_with(addr, Connector::Plain)
+    }
+
+    /// Like [`connect`](Socket::connect), but each connection performs a TLS
+    /// client handshake against `server_name`, verifying the peer's certificate
+    /// per `config`. `server_name` must match a name in the server's
+    /// certificate (it is independent of the TCP address you dial).
+    #[cfg(feature = "tls")]
+    pub fn connect_tls<A: ToSocketAddrs>(
+        &self,
+        addr: A,
+        server_name: impl Into<String>,
+        config: Arc<rustls::ClientConfig>,
+    ) -> Result<()> {
+        let name = rustls::pki_types::ServerName::try_from(server_name.into())
+            .map_err(|_| Error::InvalidServerName)?;
+        self.connect_with(addr, Connector::Tls(config, name))
+    }
+
+    fn connect_with<A: ToSocketAddrs>(&self, addr: A, connector: Connector) -> Result<()> {
         if self.inner.closed.load(Ordering::SeqCst) {
             return Err(Error::Closed);
         }
@@ -198,7 +247,9 @@ impl Socket {
         let registry = self.inner.registry.clone();
 
         let handle = std::thread::spawn(move || {
-            conn::connect_loop(resolved, cmd_tx, identity, delay, shutdown, registry);
+            conn::connect_loop(
+                resolved, connector, cmd_tx, identity, delay, shutdown, registry,
+            );
         });
         self.inner.threads.lock().unwrap().push(handle);
         Ok(())

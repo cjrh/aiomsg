@@ -59,6 +59,31 @@ See `examples/server.rs` and `examples/client.rs` (`cargo run --example server`)
 `Socket` is cheap to clone and is `Send + Sync`: send from one thread, receive
 on another.
 
+## TLS
+
+TLS uses [rustls](https://github.com/rustls/rustls) with the pure-Rust `ring`
+crypto provider — no OpenSSL, no C toolchain. It is behind the `tls` feature,
+which is **on by default**; opt out with `default-features = false`.
+
+```rust
+let server = Socket::new();
+server.bind_tls("127.0.0.1:25000", server_config)?;   // Arc<rustls::ServerConfig>
+
+let client = Socket::new();
+client.connect_tls(addr, "example.com", client_config)?;  // name must match the cert
+```
+
+The crate re-exports the matching `rustls` (`aiomsg::rustls`). The protocol is
+identical over TLS, so a TLS socket interoperates with any other
+implementation's TLS socket. See `examples/tls.rs` (`cargo run --example tls`)
+for a self-contained, runnable demo, including how to load a real certificate
+chain from PEM files.
+
+Because a TLS connection is a single object that can't be split across two
+threads, each connection is driven by one thread that interleaves reading and
+writing (plain TCP uses the same path). This adds at most a few tens of
+milliseconds of latency to a message sent while a connection is otherwise idle.
+
 ## Development
 
 ```sh
@@ -69,5 +94,7 @@ just fmt        # rustfmt
 
 ## Status
 
-Implements the full protocol v1 over plain TCP. **TLS is not yet wired up** (a
-planned follow-up; the protocol is identical with or without it).
+Implements the full protocol v1: framing, typed envelopes, the HELLO handshake
+with version check and identity de-duplication, heartbeating,
+publish/round-robin/identity routing, send buffering, reconnection,
+at-least-once delivery, and TLS (rustls/ring).

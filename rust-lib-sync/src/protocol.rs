@@ -130,6 +130,84 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
     }
 }
 
+/// The outcome of a single read attempt via [`FrameDecoder`].
+pub enum Read1 {
+    /// A complete frame is available.
+    Frame(Vec<u8>),
+    /// No complete frame yet — the read timed out or returned a partial frame.
+    /// Call again.
+    Pending,
+    /// The peer closed at a frame boundary (clean EOF).
+    Closed,
+}
+
+/// Incremental frame reader for a connection driven by one thread.
+///
+/// Unlike [`read_frame`], which assumes a read blocks until the whole frame
+/// arrives, this buffers whatever bytes are available and only yields a frame
+/// once it is complete. That lets the owning thread set a short socket read
+/// timeout and interleave reading with writing — essential for TLS, where the
+/// connection is a single object that cannot be split across two threads.
+#[derive(Default)]
+pub struct FrameDecoder {
+    buf: BytesMut,
+    chunk: Vec<u8>,
+}
+
+impl FrameDecoder {
+    pub fn new() -> Self {
+        FrameDecoder {
+            buf: BytesMut::new(),
+            chunk: vec![0u8; 16 * 1024],
+        }
+    }
+
+    /// Read at most once from `r`, returning the next complete frame if one is
+    /// now available. A timed-out read (`WouldBlock`/`TimedOut`) reports
+    /// [`Read1::Pending`] without losing buffered bytes.
+    pub fn read1<R: Read>(&mut self, r: &mut R) -> io::Result<Read1> {
+        // A previous read may have buffered more than one frame; hand those back
+        // before touching the socket again.
+        if let Some(frame) = self.take_frame() {
+            return Ok(Read1::Frame(frame));
+        }
+        match r.read(&mut self.chunk) {
+            Ok(0) => Ok(Read1::Closed),
+            Ok(n) => {
+                self.buf.extend_from_slice(&self.chunk[..n]);
+                Ok(match self.take_frame() {
+                    Some(frame) => Read1::Frame(frame),
+                    None => Read1::Pending,
+                })
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(Read1::Pending)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Split off the next complete frame from the buffer, if fully present.
+    fn take_frame(&mut self) -> Option<Vec<u8>> {
+        if self.buf.len() < 4 {
+            return None;
+        }
+        let len = u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+        if self.buf.len() < 4 + len {
+            return None;
+        }
+        let _ = self.buf.split_to(4);
+        Some(self.buf.split_to(len).to_vec())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +270,68 @@ mod tests {
             }
         );
         assert!(read_frame(&mut cursor).unwrap().is_none());
+    }
+
+    /// A reader that hands out at most `chunk` bytes per `read`, then reports a
+    /// timeout (`WouldBlock`) once, to mimic a slow/partial socket read.
+    struct Trickle {
+        data: Vec<u8>,
+        pos: usize,
+        chunk: usize,
+        stalled: bool,
+    }
+
+    impl Read for Trickle {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.pos >= self.data.len() {
+                return Ok(0);
+            }
+            if !self.stalled {
+                // Inject one timeout between chunks to exercise Pending handling.
+                self.stalled = true;
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            self.stalled = false;
+            let n = self.chunk.min(self.data.len() - self.pos);
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn decoder_reassembles_across_partial_and_timed_out_reads() {
+        let mut wire = Vec::new();
+        write_frame(&mut wire, &data(b"hello")).unwrap();
+        write_frame(&mut wire, &data(b"world")).unwrap();
+
+        let mut src = Trickle {
+            data: wire,
+            pos: 0,
+            chunk: 3, // smaller than a frame, so frames span multiple reads
+            stalled: false,
+        };
+        let mut dec = FrameDecoder::new();
+
+        let mut frames = Vec::new();
+        loop {
+            match dec.read1(&mut src).unwrap() {
+                Read1::Frame(f) => frames.push(decode(&f).unwrap()),
+                Read1::Pending => {}
+                Read1::Closed => break,
+            }
+        }
+
+        assert_eq!(
+            frames,
+            vec![
+                Envelope::Data {
+                    payload: Bytes::from_static(b"hello")
+                },
+                Envelope::Data {
+                    payload: Bytes::from_static(b"world")
+                },
+            ]
+        );
     }
 }

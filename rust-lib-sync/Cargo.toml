@@ -14,7 +14,20 @@ categories = ["network-programming"]
 name = "aiomsg"
 path = "src/lib.rs"
 
+[features]
+default = ["tls"]
+# Optional TLS via rustls (ring crypto backend, no OpenSSL / C toolchain).
+tls = ["dep:rustls"]
+
 [dependencies]
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+# rustls with the pure-Rust `ring` provider only. rustls's default features pull
+# in aws-lc-rs, which needs cmake + a C compiler; we deliberately avoid that.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"], optional = true }
+
+[dev-dependencies]
+# Test/example helpers: generate self-signed certs and read PEM files. Pure Rust.
+rcgen = "0.13"
+rustls-pemfile = "2"
