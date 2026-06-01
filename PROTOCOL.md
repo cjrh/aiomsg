@@ -88,6 +88,12 @@ Validation on the received `HELLO`:
 - If the peer's `IDENTITY` is **already connected** to this socket → reject the
   duplicate: **close** this new connection and keep the existing one.
 
+After extracting the peer's `HELLO`, an implementation MUST drain any complete
+frames already buffered by its decoder before blocking for another socket read.
+A fast peer may pipeline `HELLO` and `DATA`/`DATA_REQ` into one TCP write; if the
+post-`HELLO` bytes are left in the decoder but the reader waits for fresh socket
+bytes, those messages can appear to hang or be lost.
+
 Only after a successful exchange does the connection become active and eligible
 for `DATA`/`DATA_REQ`/`HEARTBEAT`/`ACK` traffic.
 
@@ -156,7 +162,9 @@ determine observable on-wire behaviour.
   - by-identity — write directly to the peer with the given `IDENTITY`,
     regardless of send mode.
 - **Buffering.** If `send()` is called with no connected peers, the message is
-  buffered and flushed once a peer connects. Applies to both send modes.
+  buffered and flushed once a peer connects. Applies to both send modes. A
+  connect-end socket MUST also keep messages queued while disconnected after a
+  previous connection and flush them in send order when a peer reconnects.
 - **Reconnection.** The **connect** end runs a reconnect loop for the life of
   the socket: on disconnect it waits `reconnection_delay()` (a user-supplied
   strategy, default ~0.1s; add jitter/backoff to stagger fleets) and retries.
@@ -189,12 +197,13 @@ An implementation conforms to aiomsg protocol v1 if it:
 
 1. Length-prefixes every frame with a big-endian `u32`.
 2. Emits and accepts the typed envelope of §3, and ignores unknown types.
-3. Performs the symmetric `HELLO` handshake (§4) with version check and
-   identity de-duplication.
+3. Performs the symmetric `HELLO` handshake (§4) with version check, identity
+   de-duplication, and post-`HELLO` decoder drain.
 4. Sends heartbeats on send-idle and tears down on receive-timeout (§5).
 5. Multiplexes many connections behind one socket and merges receives (§7).
 6. Implements `PUBLISH`, `ROUNDROBIN`, and by-identity routing locally (§7).
-7. Buffers sends when no peers are connected, and (on the connect end)
-   auto-reconnects (§7).
+7. Buffers sends when no peers are connected, keeps connect-end sends queued
+   across disconnects, flushes them in order after reconnect, and (on the
+   connect end) auto-reconnects (§7).
 8. Replies with `ACK` to every `DATA_REQ`, and implements sender-side resend for
    AT_LEAST_ONCE (§6), rejecting the AT_LEAST_ONCE + PUBLISH combination.

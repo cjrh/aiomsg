@@ -122,6 +122,21 @@ SCENARIOS = [
 # protocol identically whether the transport is plain TCP or rustls/crypto-tls/
 # OpenSSL. Covers each language on both the bind (TLS server) and connect (TLS
 # client) side, both Rust crates against each other, and one at-least-once path.
+LANGUAGES = [
+    "python",
+    "rust",
+    "rust-sync",
+    "go",
+    "c",
+    "cpp-sync",
+    "cpp-async",
+    "zig",
+    "java",
+    "javascript",
+    "csharp",
+    "lua",
+]
+
 TLS_SCENARIOS = [
     ("python", "bind", "rust", "connect", "publish", "at-most-once"),
     ("rust", "bind", "python", "connect", "roundrobin", "at-most-once"),
@@ -201,11 +216,12 @@ def rust_sync_agent_exe():
 
 
 @pytest.fixture(scope="session")
-def go_agent_exe(tmp_path_factory):
-    """Build the Go conformance agent once and return its binary path."""
+def go_agent_exe():
+    """Build the Go conformance agent once and return its stable local path."""
     if not _have("go"):
         pytest.skip("go not available")
-    out = tmp_path_factory.mktemp("go-agent") / "conformance_agent"
+    out = GOLANG_DIR / "build" / "conformance_agent"
+    out.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         ["go", "build", "-o", str(out), "./cmd/conformance_agent"],
         cwd=GOLANG_DIR,
@@ -329,8 +345,12 @@ def agents(
     csharp_agent_exe,
     lua_agent_cmd,
 ):
-    """Built native-agent invocations, keyed by language. A value is either a
-    binary path (string) or a full command prefix (list, e.g. for Java)."""
+    """Built native-agent invocations, keyed by SCENARIOS language strings.
+
+    A value is either a binary path (string) or a full command prefix (list,
+    e.g. for Java). Keep these keys in lockstep with SCENARIOS; `_agent_cmd`
+    handles only `python` specially and looks up every other language here.
+    """
     return {
         "rust": rust_agent_exe,
         "rust-sync": rust_sync_agent_exe,
@@ -404,6 +424,97 @@ def _launch(cmd_env):
     )
 
 
+RAW_IDENTITY = b"raw-conformance!"[:16]
+T_HELLO = 0x01
+T_HEARTBEAT = 0x02
+T_DATA = 0x03
+T_DATA_REQ = 0x04
+T_ACK = 0x05
+
+
+def _raw_frame(envelope):
+    return len(envelope).to_bytes(4, "big") + envelope
+
+
+def _raw_hello():
+    return _raw_frame(bytes((T_HELLO, 0x01)) + RAW_IDENTITY)
+
+
+def _raw_data(payload):
+    return _raw_frame(bytes((T_DATA,)) + payload)
+
+
+def _raw_ack(msg_id):
+    return _raw_frame(bytes((T_ACK,)) + msg_id)
+
+
+def _read_exact(sock, n):
+    chunks = []
+    remaining = n
+    while remaining:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            return None
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _raw_read_frame(sock):
+    header = _read_exact(sock, 4)
+    if header is None:
+        return None
+    return _read_exact(sock, int.from_bytes(header, "big"))
+
+
+def _expect_raw_hello(sock):
+    envelope = _raw_read_frame(sock)
+    assert envelope is not None, "peer closed before HELLO"
+    assert len(envelope) == 18 and envelope[0] == T_HELLO and envelope[1] == 0x01
+
+
+def _send_pipelined_hello_and_data(sock):
+    frames = [_raw_hello()]
+    frames.extend(_raw_data(f"{PREFIX}{i}".encode()) for i in range(COUNT))
+    # One send intentionally leaves DATA frames buffered behind HELLO in peers
+    # whose handshake reader consumes more than one frame from the socket.
+    sock.sendall(b"".join(frames))
+    _expect_raw_hello(sock)
+    time.sleep(0.2)
+
+
+def _collect_raw_payloads(sock, count):
+    received = []
+    while len(received) < count:
+        envelope = _raw_read_frame(sock)
+        assert envelope is not None, f"peer closed after {len(received)} messages"
+        if not envelope:
+            continue
+        typ = envelope[0]
+        if typ == T_DATA:
+            received.append(envelope[1:].decode())
+        elif typ == T_DATA_REQ and len(envelope) >= 17:
+            msg_id = envelope[1:17]
+            received.append(envelope[17:].decode())
+            sock.sendall(_raw_ack(msg_id))
+        elif typ in (T_HELLO, T_HEARTBEAT, T_ACK):
+            continue
+    return received
+
+
+def _terminate(proc):
+    if proc is None:
+        return ""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    return proc.stderr.read() if proc.stderr is not None else ""
+
+
 @pytest.mark.parametrize(
     "case", ALL_SCENARIOS, ids=[_scenario_id(c) for c in ALL_SCENARIOS]
 )
@@ -458,4 +569,98 @@ def test_interop(agents, case):
     expected = [f"{PREFIX}{i}" for i in range(COUNT)]
     assert received == expected, (
         f"sink received {received!r}, expected {expected!r}; sink stderr:\n{err}"
+    )
+
+
+@pytest.mark.parametrize("sink_lang", LANGUAGES)
+@pytest.mark.parametrize("sink_role", ["bind", "connect"])
+def test_pipelined_hello_data_reaches_sink(agents, sink_lang, sink_role):
+    """Every implementation must drain decoder-buffered post-HELLO frames.
+
+    The raw peer sends HELLO and all DATA frames in one TCP write. Implementations
+    whose handshake reader buffers beyond HELLO must forward those complete DATA
+    frames before blocking for fresh socket bytes.
+    """
+    port = _free_port()
+    sink_cmd = _agent_cmd(
+        sink_lang, agents,
+        role=sink_role, behavior="sink", port=port,
+        send_mode="roundrobin", delivery="at-most-once",
+    )
+    sink_proc = None
+    server = None
+    try:
+        if sink_role == "bind":
+            sink_proc = _launch(sink_cmd)
+            time.sleep(0.6)
+            with socket.create_connection(("127.0.0.1", port), timeout=10) as raw:
+                raw.settimeout(10)
+                _send_pipelined_hello_and_data(raw)
+        else:
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", port))
+            server.listen(1)
+            server.settimeout(10)
+            sink_proc = _launch(sink_cmd)
+            raw, _ = server.accept()
+            with raw:
+                raw.settimeout(10)
+                _send_pipelined_hello_and_data(raw)
+
+        try:
+            out, err = sink_proc.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            # Some agents keep background runtime work alive even after the sink
+            # printed all expected lines. This test is about delivery, so kill
+            # after a short grace period and evaluate captured stdout.
+            sink_proc.kill()
+            out, err = sink_proc.communicate()
+        received = [line for line in out.splitlines() if line]
+    finally:
+        if server is not None:
+            server.close()
+        if sink_proc is not None and sink_proc.poll() is None:
+            err = _terminate(sink_proc)
+
+    expected = [f"{PREFIX}{i}" for i in range(COUNT)]
+    assert received == expected, (
+        f"{sink_lang} {sink_role} sink received {received!r}, expected {expected!r}; "
+        f"stderr:\n{err}"
+    )
+
+
+@pytest.mark.parametrize("source_lang", LANGUAGES)
+def test_connect_source_buffers_until_raw_peer_appears(agents, source_lang):
+    """A connect-end source must queue sends made before a peer exists."""
+    port = _free_port()
+    source_cmd = _agent_cmd(
+        source_lang, agents,
+        role="connect", behavior="source", port=port,
+        send_mode="roundrobin", delivery="at-most-once",
+    )
+    source_proc = _launch(source_cmd)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # Give the source a window to call send() while no listener exists.
+        time.sleep(0.6)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", port))
+        server.listen(1)
+        server.settimeout(10)
+        raw, _ = server.accept()
+        with raw:
+            raw.settimeout(10)
+            raw.sendall(_raw_hello())
+            _expect_raw_hello(raw)
+            received = _collect_raw_payloads(raw, COUNT)
+
+    finally:
+        server.close()
+        err = _terminate(source_proc)
+
+    expected = [f"{PREFIX}{i}" for i in range(COUNT)]
+    assert received == expected, (
+        f"{source_lang} connect source sent {received!r}, expected {expected!r}; "
+        f"stderr:\n{err}"
     )
