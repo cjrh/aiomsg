@@ -744,17 +744,25 @@ It turns out that the required setup follows directly from the previous
 one: you just add another connect call in the workers.
 
 ```mermaid
-flowchart LR
-    DNSA["DNS<br/>a.jobcreator.com"] -. "resolves to" .-> JCA["jobcreator.py<br/>AZ A<br/>bind 0.0.0.0:25001"]
-    DNSB["DNS<br/>b.jobcreator.com"] -. "resolves to" .-> JCB["jobcreator.py<br/>AZ B<br/>bind 0.0.0.0:25001"]
-    W1["worker.py instance A<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
-    W1 -->|"connect b.jobcreator.com:25001"| JCB
-    W2["worker.py instance B<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
-    W2 -->|"connect b.jobcreator.com:25001"| JCB
-    JCA -->|"jobs"| W1
-    JCA -->|"jobs"| W2
-    JCB -->|"jobs"| W1
-    JCB -->|"jobs"| W2
+flowchart TB
+    subgraph Names["Stable DNS names"]
+        direction LR
+        DNSA["DNS<br/>a.jobcreator.com"]
+        DNSB["DNS<br/>b.jobcreator.com"]
+    end
+
+    subgraph Creators["2 jobcreator.py instances"]
+        direction LR
+        JCA["AZ A<br/>bind 0.0.0.0:25001<br/>SendMode.ROUNDROBIN"]
+        JCB["AZ B<br/>bind 0.0.0.0:25001<br/>SendMode.ROUNDROBIN"]
+    end
+
+    Workers["dynamic worker pool<br/>worker.py instances A ... N<br/>connect a.jobcreator.com:25001<br/>connect b.jobcreator.com:25001"]
+
+    DNSA -. "resolves to" .-> JCA
+    DNSB -. "resolves to" .-> JCB
+    JCA -->|"jobs"| Workers
+    JCB -->|"jobs"| Workers
 ```
 
 The manually-scaled service is as before, but you start on instance of
@@ -922,34 +930,28 @@ unchanged from before. We just need to run more copies of it on
 different machines. *Each machine will have a different domain name*.
 
 ```mermaid
-flowchart LR
-    ENV["PROXY_HOSTNAMES<br/>px1.jobcreator.com;px2.jobcreator.com;px3.jobcreator.com"]
-    DC["dynamiccreator.py instances<br/>connect every proxy on port 25001"]
-    W["worker.py instances<br/>connect every proxy on port 25002"]
+flowchart TB
+    ENV["PROXY_HOSTNAMES<br/>px1.jobcreator.com; px2.jobcreator.com; px3.jobcreator.com"]
+
+    DC["dynamiccreator.py pool<br/>instances A ... N<br/>connect px1.jobcreator.com:25001<br/>connect px2.jobcreator.com:25001<br/>connect px3.jobcreator.com:25001"]
+
+    subgraph Proxies["proxy.py fleet"]
+        direction TB
+        PX1["px1.jobcreator.com<br/>sock1 bind 0.0.0.0:25001<br/>sock2 bind 0.0.0.0:25002"]
+        PX2["px2.jobcreator.com<br/>sock1 bind 0.0.0.0:25001<br/>sock2 bind 0.0.0.0:25002"]
+        PX3["px3.jobcreator.com<br/>sock1 bind 0.0.0.0:25001<br/>sock2 bind 0.0.0.0:25002"]
+    end
+
+    W["worker.py pool<br/>instances A ... N<br/>connect px1.jobcreator.com:25002<br/>connect px2.jobcreator.com:25002<br/>connect px3.jobcreator.com:25002"]
 
     ENV -. "configured in" .-> DC
     ENV -. "configured in" .-> W
-
-    DC -->|"connect px1:25001"| PX1IN
-    DC -->|"connect px2:25001"| PX2IN
-    DC -->|"connect px3:25001"| PX3IN
-
-    subgraph PX1["proxy.py on px1.jobcreator.com"]
-        PX1IN["sock1 bind 0.0.0.0:25001"] --> PX1OUT["sock2 bind 0.0.0.0:25002"]
-    end
-    subgraph PX2["proxy.py on px2.jobcreator.com"]
-        PX2IN["sock1 bind 0.0.0.0:25001"] --> PX2OUT["sock2 bind 0.0.0.0:25002"]
-    end
-    subgraph PX3["proxy.py on px3.jobcreator.com"]
-        PX3IN["sock1 bind 0.0.0.0:25001"] --> PX3OUT["sock2 bind 0.0.0.0:25002"]
-    end
-
-    W -->|"connect px1:25002"| PX1OUT
-    W -->|"connect px2:25002"| PX2OUT
-    W -->|"connect px3:25002"| PX3OUT
-    PX1OUT -->|"jobs"| W
-    PX2OUT -->|"jobs"| W
-    PX3OUT -->|"jobs"| W
+    DC -->|"jobs to port 25001"| PX1
+    DC -->|"jobs to port 25001"| PX2
+    DC -->|"jobs to port 25001"| PX3
+    PX1 -->|"forwarded jobs from port 25002"| W
+    PX2 -->|"forwarded jobs from port 25002"| W
+    PX3 -->|"forwarded jobs from port 25002"| W
 ```
 
 ```python
