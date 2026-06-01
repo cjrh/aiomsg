@@ -26,18 +26,20 @@ subdirectory:
 
 | Directory | Implementation | Status |
 |---|---|---|
-| `python-lib/` | Python, asyncio (the reference implementation) | available |
-| `rust-lib-async/` | Rust, async (tokio) | available |
-| `rust-lib-sync/` | Rust, synchronous (threads) | available |
-| `golang-lib/` | Go, goroutines + channels | available |
-| `c-lib/` | C, synchronous (pthreads) | available |
-| `cpp-lib-sync/` | C++, synchronous (std::thread) | available |
-| `cpp-lib-async/` | C++, async (Asio + C++20 coroutines) | available |
-| `zig-lib/` | Zig, `std.Io` | available |
-| `java-lib/` | Java, blocking I/O on virtual threads | available |
-| `javascript-lib/` | JavaScript, Node.js async (`net`/`tls`) | available |
-| `csharp-lib/` | C#, async/await (`SslStream`) | available |
-| `lua-lib/` | Lua, cooperative reactor (LuaSocket + LuaSec) | available |
+| `python-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg" alt="Python" width="20" height="20"> Python, asyncio (the reference implementation) | available |
+| `rust-lib-async/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/rust/rust-original.svg" alt="Rust" width="20" height="20"> Rust, async (tokio) | available |
+| `rust-lib-sync/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/rust/rust-original.svg" alt="Rust" width="20" height="20"> Rust, synchronous (threads) | available |
+| `golang-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/go/go-original.svg" alt="Go" width="20" height="20"> Go, goroutines + channels | available |
+| `c-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/c/c-original.svg" alt="C" width="20" height="20"> C, synchronous (pthreads) | available |
+| `cpp-lib-sync/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cplusplus/cplusplus-original.svg" alt="C++" width="20" height="20"> C++, synchronous (std::thread) | available |
+| `cpp-lib-async/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cplusplus/cplusplus-original.svg" alt="C++" width="20" height="20"> C++, async (Asio + C++20 coroutines) | available |
+| `zig-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/zig/zig-original.svg" alt="Zig" width="20" height="20"> Zig, `std.Io` | available |
+| `java-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/java/java-original.svg" alt="Java" width="20" height="20"> Java, blocking I/O on virtual threads | available |
+| `javascript-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/javascript/javascript-original.svg" alt="JavaScript" width="20" height="20"> JavaScript, Node.js async (`net`/`tls`) | available |
+| `csharp-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/csharp/csharp-original.svg" alt="C#" width="20" height="20"> C#, async/await (`SslStream`) | available |
+| `lua-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/lua/lua-original.svg" alt="Lua" width="20" height="20"> Lua, cooperative reactor (LuaSocket + LuaSec) | available |
+
+<sub>Language icons are served by the [Devicon](https://devicon.dev/) CDN.</sub>
 
 Every implementation supports TLS, using its language's idiomatic facility
 (rustls with the pure-Rust `ring` backend for both Rust crates, `crypto/tls`
