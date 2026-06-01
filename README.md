@@ -26,18 +26,20 @@ subdirectory:
 
 | Directory | Implementation | Status |
 |---|---|---|
-| `python-lib/` | Python, asyncio (the reference implementation) | available |
-| `rust-lib-async/` | Rust, async (tokio) | available |
-| `rust-lib-sync/` | Rust, synchronous (threads) | available |
-| `golang-lib/` | Go, goroutines + channels | available |
-| `c-lib/` | C, synchronous (pthreads) | available |
-| `cpp-lib-sync/` | C++, synchronous (std::thread) | available |
-| `cpp-lib-async/` | C++, async (Asio + C++20 coroutines) | available |
-| `zig-lib/` | Zig, `std.Io` | available |
-| `java-lib/` | Java, blocking I/O on virtual threads | available |
-| `javascript-lib/` | JavaScript, Node.js async (`net`/`tls`) | available |
-| `csharp-lib/` | C#, async/await (`SslStream`) | available |
-| `lua-lib/` | Lua, cooperative reactor (LuaSocket + LuaSec) | available |
+| `python-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg" alt="Python" width="20" height="20"> Python, asyncio (the reference implementation) | available |
+| `rust-lib-async/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/rust/rust-original.svg" alt="Rust" width="20" height="20"> Rust, async (tokio) | available |
+| `rust-lib-sync/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/rust/rust-original.svg" alt="Rust" width="20" height="20"> Rust, synchronous (threads) | available |
+| `golang-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/go/go-original.svg" alt="Go" width="20" height="20"> Go, goroutines + channels | available |
+| `c-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/c/c-original.svg" alt="C" width="20" height="20"> C, synchronous (pthreads) | available |
+| `cpp-lib-sync/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cplusplus/cplusplus-original.svg" alt="C++" width="20" height="20"> C++, synchronous (std::thread) | available |
+| `cpp-lib-async/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cplusplus/cplusplus-original.svg" alt="C++" width="20" height="20"> C++, async (Asio + C++20 coroutines) | available |
+| `zig-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/zig/zig-original.svg" alt="Zig" width="20" height="20"> Zig, `std.Io` | available |
+| `java-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/java/java-original.svg" alt="Java" width="20" height="20"> Java, blocking I/O on virtual threads | available |
+| `javascript-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/javascript/javascript-original.svg" alt="JavaScript" width="20" height="20"> JavaScript, Node.js async (`net`/`tls`) | available |
+| `csharp-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/csharp/csharp-original.svg" alt="C#" width="20" height="20"> C#, async/await (`SslStream`) | available |
+| `lua-lib/` | <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/lua/lua-original.svg" alt="Lua" width="20" height="20"> Lua, cooperative reactor (LuaSocket + LuaSec) | available |
+
+<sub>Language icons are served by the [Devicon](https://devicon.dev/) CDN.</sub>
 
 Every implementation supports TLS, using its language's idiomatic facility
 (rustls with the pure-Rust `ring` backend for both Rust crates, `crypto/tls`
@@ -625,6 +627,19 @@ make the complete programs.
 The choice of "which peer should bind" is unaffected by the sending mode
 of the socket.
 
+```mermaid
+flowchart LR
+    subgraph BindPublisher["Publisher binds"]
+        PB["publisher<br/>bind socket<br/>SendMode.PUBLISH"] -->|"News!"| BPA["connected peer A"]
+        PB -->|"News!"| BPB["connected peer B"]
+    end
+
+    subgraph ConnectPublisher["Publisher connects"]
+        BB["stable peer<br/>bind socket"] <-->|"connect()"| PC["publisher<br/>connect socket<br/>SendMode.PUBLISH"]
+        PC -->|"News!"| BB
+    end
+```
+
 Compare
 
 ```python
@@ -672,6 +687,17 @@ instances. (In ZeroMQ documentation, this is described as the
 `aiomsg` handles this very easily: just make sure that the
 dynamically-scaled service is making the connect calls:
 
+```mermaid
+flowchart LR
+    DNS["DNS<br/>jobcreator.com"] -. "resolves to" .-> JC["jobcreator.py<br/>bind 0.0.0.0:25001<br/>SendMode.ROUNDROBIN"]
+    W1["worker.py instance A<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    W2["worker.py instance B<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    WN["worker.py instance N<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    JC -->|"job (round-robin)"| W1
+    JC -->|"job (round-robin)"| W2
+    JC -->|"job (round-robin)"| WN
+```
+
 This is the manually-scaled service (has a specific domain name):
 
 ```python
@@ -716,6 +742,20 @@ Each instance will have a different domain name.
 
 It turns out that the required setup follows directly from the previous
 one: you just add another connect call in the workers.
+
+```mermaid
+flowchart LR
+    DNSA["DNS<br/>a.jobcreator.com"] -. "resolves to" .-> JCA["jobcreator.py<br/>AZ A<br/>bind 0.0.0.0:25001"]
+    DNSB["DNS<br/>b.jobcreator.com"] -. "resolves to" .-> JCB["jobcreator.py<br/>AZ B<br/>bind 0.0.0.0:25001"]
+    W1["worker.py instance A<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
+    W1 -->|"connect b.jobcreator.com:25001"| JCB
+    W2["worker.py instance B<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
+    W2 -->|"connect b.jobcreator.com:25001"| JCB
+    JCA -->|"jobs"| W1
+    JCA -->|"jobs"| W2
+    JCB -->|"jobs"| W1
+    JCB -->|"jobs"| W2
+```
 
 The manually-scaled service is as before, but you start on instance of
 `jobcreator.py` on machine "a.jobcreator.com", and start another
@@ -766,6 +806,22 @@ The answer is to create an intermediate proxy service that has
 **two** bind sockets, with long-lived domain names. This is what
 will allow the other two dynamically-scaled services to have
 a dynamic number of instances.
+
+```mermaid
+flowchart LR
+    DNS["DNS<br/>proxy.jobcreator.com"] -. "resolves to" .-> P1
+    DC1["dynamiccreator.py instance A<br/>connect proxy.jobcreator.com:25001"] -->|"TCP connect"| P1
+    DCN["dynamiccreator.py instance N<br/>connect proxy.jobcreator.com:25001"] -->|"TCP connect"| P1
+
+    subgraph Proxy["proxy.py"]
+        P1["sock1<br/>bind 0.0.0.0:25001"] -->|"recv work; forward"| P2["sock2<br/>bind 0.0.0.0:25002<br/>SendMode.ROUNDROBIN"]
+    end
+
+    W1["worker.py instance A<br/>connect proxy.jobcreator.com:25002"] -->|"TCP connect"| P2
+    WN["worker.py instance N<br/>connect proxy.jobcreator.com:25002"] -->|"TCP connect"| P2
+    P2 -->|"job (round-robin)"| W1
+    P2 -->|"job (round-robin)"| WN
+```
 
 Here is the new job creator, whose name we change to `dynamiccreator.py`
 to reflect that it is now dynamically scalable:
@@ -865,6 +921,37 @@ Let's jump straight into code. The proxy code itself is actually
 unchanged from before. We just need to run more copies of it on
 different machines. *Each machine will have a different domain name*.
 
+```mermaid
+flowchart LR
+    ENV["PROXY_HOSTNAMES<br/>px1.jobcreator.com;px2.jobcreator.com;px3.jobcreator.com"]
+    DC["dynamiccreator.py instances<br/>connect every proxy on port 25001"]
+    W["worker.py instances<br/>connect every proxy on port 25002"]
+
+    ENV -. "configured in" .-> DC
+    ENV -. "configured in" .-> W
+
+    DC -->|"connect px1:25001"| PX1IN
+    DC -->|"connect px2:25001"| PX2IN
+    DC -->|"connect px3:25001"| PX3IN
+
+    subgraph PX1["proxy.py on px1.jobcreator.com"]
+        PX1IN["sock1 bind 0.0.0.0:25001"] --> PX1OUT["sock2 bind 0.0.0.0:25002"]
+    end
+    subgraph PX2["proxy.py on px2.jobcreator.com"]
+        PX2IN["sock1 bind 0.0.0.0:25001"] --> PX2OUT["sock2 bind 0.0.0.0:25002"]
+    end
+    subgraph PX3["proxy.py on px3.jobcreator.com"]
+        PX3IN["sock1 bind 0.0.0.0:25001"] --> PX3OUT["sock2 bind 0.0.0.0:25002"]
+    end
+
+    W -->|"connect px1:25002"| PX1OUT
+    W -->|"connect px2:25002"| PX2OUT
+    W -->|"connect px3:25002"| PX3OUT
+    PX1OUT -->|"jobs"| W
+    PX2OUT -->|"jobs"| W
+    PX3OUT -->|"jobs"| W
+```
+
 ```python
 # proxy.py -> unchanged from the previous recipe
 async def main():
@@ -944,6 +1031,15 @@ It sounds complicated, but at a high level you just need to supply
 an `SSLContext` instance to the bind socket, and a different `SSLContext`
 instance to the connect socket (usually on a different computer). The details
 are all stored in the `SSLContext` objects.
+
+```mermaid
+flowchart LR
+    C["connect socket<br/>connect 127.0.0.1:25000<br/>SSLContext SERVER_AUTH"] <-->|"TLS connection"| B["bind socket<br/>bind 127.0.0.1:25000<br/>SSLContext CLIENT_AUTH"]
+    ServerCert["server.cert + server.key"] -. "load_cert_chain" .-> B
+    ClientCert["client.cert + client.key"] -. "load_cert_chain" .-> C
+    CTrust["connect context<br/>load_verify_locations(server.cert)<br/>check_hostname = True"] -->|"verifies bind peer"| B
+    BTrust["bind context<br/>load_verify_locations(client.cert)"] -->|"verifies connect peer"| C
+```
 
 Let's first look at how that looks for a typical bind socket and connect
 socket:
@@ -1172,6 +1268,60 @@ above), you don't need to implement anything at all, just use it.
 This repository hosts several language implementations, each in its own
 subdirectory with its own tooling. Every implementation exposes a uniform
 `just test` recipe, and the top-level `justfile` dispatches to each.
+
+## Install development dependencies
+
+Install these packages before running `just test-all`, `just build-agents`, or
+the cross-language conformance suite. They cover the Python, Rust, Go, C,
+C++, Zig, Java, JavaScript, C#, and Lua implementations.
+
+Fedora Linux 44:
+
+```shell
+sudo dnf install -y \
+  git just uv python3 python3-devel \
+  rust cargo golang \
+  gcc gcc-c++ cmake make pkgconf-pkg-config openssl-devel asio-devel \
+  zig java-25-openjdk-devel nodejs24 nodejs24-npm dotnet-sdk-9.0 \
+  lua lua-devel lua-socket lua-sec luarocks
+```
+
+Ubuntu/Debian-family systems:
+
+```shell
+sudo apt update
+sudo apt install -y \
+  git just curl \
+  rustup golang-go \
+  build-essential cmake pkg-config libssl-dev libasio-dev \
+  openjdk-25-jdk nodejs npm dotnet-sdk-9.0 \
+  python3 python3-dev python3-venv python3-pip \
+  lua5.4 liblua5.4-dev luarocks lua-socket lua-sec
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Ubuntu packages for `zig`, `openjdk-25-jdk`, and `dotnet-sdk-9.0` vary by
+release and enabled repositories. The Zig implementation uses Zig 0.16's
+`std.Io`, so install Zig 0.16 or newer from your distro package, Snap, or
+<https://ziglang.org/download/> if `apt install zig` is older. For .NET, enable
+Microsoft's package repository if your Ubuntu release does not provide
+`dotnet-sdk-9.0` directly.
+
+Arch Linux:
+
+```shell
+sudo pacman -Syu --needed \
+  git just uv python \
+  rust go \
+  base-devel cmake pkgconf openssl asio \
+  zig jdk-openjdk nodejs npm dotnet-sdk \
+  lua luarocks lua-socket lua-sec
+```
+
+The Java implementation is tested with OpenJDK 25 locally, but any recent JDK
+with virtual-thread support should work. The C# implementation targets .NET 9;
+on rolling distributions such as Arch, `dotnet-sdk` should be version 9 or
+newer.
 
 The Python reference implementation uses [uv](https://docs.astral.sh/uv/) and
 [just](https://github.com/casey/just):
