@@ -625,6 +625,19 @@ make the complete programs.
 The choice of "which peer should bind" is unaffected by the sending mode
 of the socket.
 
+```mermaid
+flowchart LR
+    subgraph BindPublisher["Publisher binds"]
+        PB["publisher<br/>bind socket<br/>SendMode.PUBLISH"] -->|"News!"| BPA["connected peer A"]
+        PB -->|"News!"| BPB["connected peer B"]
+    end
+
+    subgraph ConnectPublisher["Publisher connects"]
+        BB["stable peer<br/>bind socket"] <-->|"connect()"| PC["publisher<br/>connect socket<br/>SendMode.PUBLISH"]
+        PC -->|"News!"| BB
+    end
+```
+
 Compare
 
 ```python
@@ -672,6 +685,17 @@ instances. (In ZeroMQ documentation, this is described as the
 `aiomsg` handles this very easily: just make sure that the
 dynamically-scaled service is making the connect calls:
 
+```mermaid
+flowchart LR
+    DNS["DNS<br/>jobcreator.com"] -. "resolves to" .-> JC["jobcreator.py<br/>bind 0.0.0.0:25001<br/>SendMode.ROUNDROBIN"]
+    W1["worker.py instance A<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    W2["worker.py instance B<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    WN["worker.py instance N<br/>connect jobcreator.com:25001"] -->|"TCP connect"| JC
+    JC -->|"job (round-robin)"| W1
+    JC -->|"job (round-robin)"| W2
+    JC -->|"job (round-robin)"| WN
+```
+
 This is the manually-scaled service (has a specific domain name):
 
 ```python
@@ -716,6 +740,20 @@ Each instance will have a different domain name.
 
 It turns out that the required setup follows directly from the previous
 one: you just add another connect call in the workers.
+
+```mermaid
+flowchart LR
+    DNSA["DNS<br/>a.jobcreator.com"] -. "resolves to" .-> JCA["jobcreator.py<br/>AZ A<br/>bind 0.0.0.0:25001"]
+    DNSB["DNS<br/>b.jobcreator.com"] -. "resolves to" .-> JCB["jobcreator.py<br/>AZ B<br/>bind 0.0.0.0:25001"]
+    W1["worker.py instance A<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
+    W1 -->|"connect b.jobcreator.com:25001"| JCB
+    W2["worker.py instance B<br/>connect both creators"] -->|"connect a.jobcreator.com:25001"| JCA
+    W2 -->|"connect b.jobcreator.com:25001"| JCB
+    JCA -->|"jobs"| W1
+    JCA -->|"jobs"| W2
+    JCB -->|"jobs"| W1
+    JCB -->|"jobs"| W2
+```
 
 The manually-scaled service is as before, but you start on instance of
 `jobcreator.py` on machine "a.jobcreator.com", and start another
@@ -766,6 +804,22 @@ The answer is to create an intermediate proxy service that has
 **two** bind sockets, with long-lived domain names. This is what
 will allow the other two dynamically-scaled services to have
 a dynamic number of instances.
+
+```mermaid
+flowchart LR
+    DNS["DNS<br/>proxy.jobcreator.com"] -. "resolves to" .-> P1
+    DC1["dynamiccreator.py instance A<br/>connect proxy.jobcreator.com:25001"] -->|"TCP connect"| P1
+    DCN["dynamiccreator.py instance N<br/>connect proxy.jobcreator.com:25001"] -->|"TCP connect"| P1
+
+    subgraph Proxy["proxy.py"]
+        P1["sock1<br/>bind 0.0.0.0:25001"] -->|"recv work; forward"| P2["sock2<br/>bind 0.0.0.0:25002<br/>SendMode.ROUNDROBIN"]
+    end
+
+    W1["worker.py instance A<br/>connect proxy.jobcreator.com:25002"] -->|"TCP connect"| P2
+    WN["worker.py instance N<br/>connect proxy.jobcreator.com:25002"] -->|"TCP connect"| P2
+    P2 -->|"job (round-robin)"| W1
+    P2 -->|"job (round-robin)"| WN
+```
 
 Here is the new job creator, whose name we change to `dynamiccreator.py`
 to reflect that it is now dynamically scalable:
@@ -865,6 +919,37 @@ Let's jump straight into code. The proxy code itself is actually
 unchanged from before. We just need to run more copies of it on
 different machines. *Each machine will have a different domain name*.
 
+```mermaid
+flowchart LR
+    ENV["PROXY_HOSTNAMES<br/>px1.jobcreator.com;px2.jobcreator.com;px3.jobcreator.com"]
+    DC["dynamiccreator.py instances<br/>connect every proxy on port 25001"]
+    W["worker.py instances<br/>connect every proxy on port 25002"]
+
+    ENV -. "configured in" .-> DC
+    ENV -. "configured in" .-> W
+
+    DC -->|"connect px1:25001"| PX1IN
+    DC -->|"connect px2:25001"| PX2IN
+    DC -->|"connect px3:25001"| PX3IN
+
+    subgraph PX1["proxy.py on px1.jobcreator.com"]
+        PX1IN["sock1 bind 0.0.0.0:25001"] --> PX1OUT["sock2 bind 0.0.0.0:25002"]
+    end
+    subgraph PX2["proxy.py on px2.jobcreator.com"]
+        PX2IN["sock1 bind 0.0.0.0:25001"] --> PX2OUT["sock2 bind 0.0.0.0:25002"]
+    end
+    subgraph PX3["proxy.py on px3.jobcreator.com"]
+        PX3IN["sock1 bind 0.0.0.0:25001"] --> PX3OUT["sock2 bind 0.0.0.0:25002"]
+    end
+
+    W -->|"connect px1:25002"| PX1OUT
+    W -->|"connect px2:25002"| PX2OUT
+    W -->|"connect px3:25002"| PX3OUT
+    PX1OUT -->|"jobs"| W
+    PX2OUT -->|"jobs"| W
+    PX3OUT -->|"jobs"| W
+```
+
 ```python
 # proxy.py -> unchanged from the previous recipe
 async def main():
@@ -944,6 +1029,15 @@ It sounds complicated, but at a high level you just need to supply
 an `SSLContext` instance to the bind socket, and a different `SSLContext`
 instance to the connect socket (usually on a different computer). The details
 are all stored in the `SSLContext` objects.
+
+```mermaid
+flowchart LR
+    C["connect socket<br/>connect 127.0.0.1:25000<br/>SSLContext SERVER_AUTH"] <-->|"TLS connection"| B["bind socket<br/>bind 127.0.0.1:25000<br/>SSLContext CLIENT_AUTH"]
+    ServerCert["server.cert + server.key"] -. "load_cert_chain" .-> B
+    ClientCert["client.cert + client.key"] -. "load_cert_chain" .-> C
+    CTrust["connect context<br/>load_verify_locations(server.cert)<br/>check_hostname = True"] -->|"verifies bind peer"| B
+    BTrust["bind context<br/>load_verify_locations(client.cert)"] -->|"verifies connect peer"| C
+```
 
 Let's first look at how that looks for a typical bind socket and connect
 socket:
