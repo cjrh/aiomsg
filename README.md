@@ -1173,6 +1173,60 @@ This repository hosts several language implementations, each in its own
 subdirectory with its own tooling. Every implementation exposes a uniform
 `just test` recipe, and the top-level `justfile` dispatches to each.
 
+## Install development dependencies
+
+Install these packages before running `just test-all`, `just build-agents`, or
+the cross-language conformance suite. They cover the Python, Rust, Go, C,
+C++, Zig, Java, JavaScript, C#, and Lua implementations.
+
+Fedora Linux 44:
+
+```shell
+sudo dnf install -y \
+  git just uv python3 python3-devel \
+  rust cargo golang \
+  gcc gcc-c++ cmake make pkgconf-pkg-config openssl-devel asio-devel \
+  zig java-25-openjdk-devel nodejs24 nodejs24-npm dotnet-sdk-9.0 \
+  lua lua-devel lua-socket lua-sec luarocks
+```
+
+Ubuntu/Debian-family systems:
+
+```shell
+sudo apt update
+sudo apt install -y \
+  git just curl \
+  rustup golang-go \
+  build-essential cmake pkg-config libssl-dev libasio-dev \
+  openjdk-25-jdk nodejs npm dotnet-sdk-9.0 \
+  python3 python3-dev python3-venv python3-pip \
+  lua5.4 liblua5.4-dev luarocks lua-socket lua-sec
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Ubuntu packages for `zig`, `openjdk-25-jdk`, and `dotnet-sdk-9.0` vary by
+release and enabled repositories. The Zig implementation uses Zig 0.16's
+`std.Io`, so install Zig 0.16 or newer from your distro package, Snap, or
+<https://ziglang.org/download/> if `apt install zig` is older. For .NET, enable
+Microsoft's package repository if your Ubuntu release does not provide
+`dotnet-sdk-9.0` directly.
+
+Arch Linux:
+
+```shell
+sudo pacman -Syu --needed \
+  git just uv python \
+  rust go \
+  base-devel cmake pkgconf openssl asio \
+  zig jdk-openjdk nodejs npm dotnet-sdk \
+  lua luarocks lua-socket lua-sec
+```
+
+The Java implementation is tested with OpenJDK 25 locally, but any recent JDK
+with virtual-thread support should work. The C# implementation targets .NET 9;
+on rolling distributions such as Arch, `dotnet-sdk` should be version 9 or
+newer.
+
 The Python reference implementation uses [uv](https://docs.astral.sh/uv/) and
 [just](https://github.com/casey/just):
 
