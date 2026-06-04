@@ -33,7 +33,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       # `just test` runs `./gradlew test` (the committed wrapper fetches Gradle):
       # the JUnit 5 protocol unit tests + the in-process TCP/TLS integration test.
       - name: Test

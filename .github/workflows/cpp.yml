@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install OpenSSL headers
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Test
         run: just test
         working-directory: ${{ matrix.dir }}

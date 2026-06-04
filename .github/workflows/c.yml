@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install OpenSSL headers
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       # `just test` configures with CMake, builds, and runs CTest (protocol unit
       # tests + the in-process TCP/TLS integration test) — exactly as run locally.
       - name: Test

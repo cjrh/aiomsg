@@ -33,7 +33,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       # `just test` runs `zig build test`: protocol unit tests + the in-process
       # TCP/TLS integration test.
       - name: Test
