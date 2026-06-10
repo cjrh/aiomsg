@@ -53,6 +53,239 @@ The canonical, language-independent wire specification lives in
 [PROTOCOL.md](PROTOCOL.md). The overall plan and per-language design notes are
 in [DESIGN.md](DESIGN.md).
 
+## Using an implementation from Git
+
+You do not need to wait for each implementation to be published to every
+language registry. Pin this repository to a commit, tag, or branch and point
+your language's normal dependency tool at the implementation directory you use.
+In the examples below, `<git-ref>` means a normal Git reference: a commit SHA,
+a tag, or a branch name. Tags work with the Git-ref forms shown here; for
+reproducible builds, prefer a commit SHA or release tag over `main`. If your
+package manager cannot install from a Git subdirectory directly, add the repo as
+a Git submodule and use the shown path-based reference. Commit the submodule
+pointer to pin the exact revision:
+
+```sh
+git submodule add https://github.com/cjrh/aiomsg.git vendor/aiomsg
+```
+
+### Python
+
+```sh
+pip install "aiomsg @ git+https://github.com/cjrh/aiomsg.git@<git-ref>#subdirectory=python-lib"
+uv add "aiomsg @ git+https://github.com/cjrh/aiomsg.git@<git-ref>#subdirectory=python-lib"
+```
+
+For a local checkout or submodule:
+
+```sh
+pip install ./vendor/aiomsg/python-lib
+uv add ./vendor/aiomsg/python-lib
+```
+
+### Rust
+
+Cargo does not need a subdirectory field here. It searches the Git repository
+for a package with the requested `package` name:
+
+- `package = "aiomsg"` selects `rust-lib-async/Cargo.toml`.
+- `package = "aiomsg-sync"` selects `rust-lib-sync/Cargo.toml`.
+
+Use exactly one of `tag`, `rev`, or `branch` to pin the Git reference. For
+example, pinned to a tag.
+
+Async Tokio implementation from `rust-lib-async/`:
+
+```toml
+[dependencies]
+aiomsg = { git = "https://github.com/cjrh/aiomsg.git", package = "aiomsg", tag = "<tag>" }
+```
+
+Synchronous threaded implementation from `rust-lib-sync/`:
+
+```toml
+[dependencies]
+aiomsg = { git = "https://github.com/cjrh/aiomsg.git", package = "aiomsg-sync", tag = "<tag>" }
+```
+
+For a commit SHA or branch, replace `tag = "<tag>"` with `rev = "<commit-sha>"`
+or `branch = "<branch>"`.
+
+For a local checkout or submodule, use `path` instead of `git`:
+
+Async Tokio implementation:
+
+```toml
+[dependencies]
+aiomsg = { path = "vendor/aiomsg/rust-lib-async" }
+```
+
+Synchronous threaded implementation:
+
+```toml
+[dependencies]
+aiomsg = { package = "aiomsg-sync", path = "vendor/aiomsg/rust-lib-sync" }
+```
+
+### Go
+
+```sh
+go get github.com/cjrh/aiomsg/golang-lib@<git-ref>
+```
+
+Commit SHAs and branches work directly. If you use semantic release tags for the
+Go module, tag them with the subdirectory prefix, such as `golang-lib/v1.0.0`.
+
+Then import it in Go code:
+
+```go
+import aiomsg "github.com/cjrh/aiomsg/golang-lib"
+```
+
+For a local checkout or submodule, add a `replace` directive:
+
+```go
+replace github.com/cjrh/aiomsg/golang-lib => ./vendor/aiomsg/golang-lib
+```
+
+### C and C++
+
+CMake 3.18+ can fetch one implementation directory from this repository. Set
+`SOURCE_SUBDIR` to `c-lib`, `cpp-lib-sync`, or `cpp-lib-async`:
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(aiomsg
+    GIT_REPOSITORY https://github.com/cjrh/aiomsg.git
+    GIT_TAG <git-ref>
+    SOURCE_SUBDIR c-lib)
+FetchContent_MakeAvailable(aiomsg)
+
+target_link_libraries(myapp PRIVATE aiomsg::aiomsg)
+```
+
+For a local checkout or submodule:
+
+```cmake
+add_subdirectory(vendor/aiomsg/c-lib aiomsg-c)
+target_link_libraries(myapp PRIVATE aiomsg::aiomsg)
+```
+
+### Zig
+
+Zig can fetch Git packages directly when the Git repository root is the Zig
+package root. In this monorepo the Zig package root is `zig-lib/`, and Zig does
+not currently have a Git URL subdirectory selector. If the Zig implementation
+is ever split into its own repository, the direct form would be:
+
+```sh
+zig fetch --save git+https://...#<git-ref>
+```
+
+For this repository, pin it with Git, then reference the Zig package directory
+from `build.zig.zon`:
+
+```zig
+.dependencies = .{
+    .aiomsg = .{ .path = "vendor/aiomsg/zig-lib" },
+},
+```
+
+Then import the module in `build.zig`:
+
+```zig
+const aiomsg = b.dependency("aiomsg", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("aiomsg", aiomsg.module("aiomsg"));
+```
+
+### JavaScript / Node.js
+
+Node package managers can install a Git repository directly when `package.json`
+is at the repository root. Here it lives in `javascript-lib/`, and `npm` has no
+standard Git URL subdirectory selector. If the JavaScript implementation is ever
+split into its own repository, the direct form would be a normal Git dependency:
+
+```json
+{
+  "dependencies": {
+    "aiomsg": "github:cjrh/aiomsg-js#<git-ref>"
+  }
+}
+```
+
+For this repository, use a Git submodule or local checkout and a normal `file:`
+dependency:
+
+```json
+{
+  "dependencies": {
+    "aiomsg": "file:vendor/aiomsg/javascript-lib"
+  }
+}
+```
+
+Or install it into the current project:
+
+```sh
+npm install ./vendor/aiomsg/javascript-lib
+```
+
+### Java / Gradle
+
+Gradle and Maven do not have a simple standard dependency notation for a Git
+subdirectory. Use a Git submodule or local checkout and include the Java build
+as a Gradle composite build.
+
+In `settings.gradle.kts`:
+
+```kotlin
+includeBuild("vendor/aiomsg/java-lib") {
+    dependencySubstitution {
+        substitute(module("aiomsg:aiomsg")).using(project(":"))
+    }
+}
+```
+
+In `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation("aiomsg:aiomsg:0")
+}
+```
+
+### C# / .NET
+
+NuGet does not consume arbitrary Git repositories directly. Use a Git submodule
+or local checkout and reference the library project:
+
+```sh
+dotnet add reference vendor/aiomsg/csharp-lib/Aiomsg/Aiomsg.csproj
+```
+
+Equivalent `.csproj` entry:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="vendor/aiomsg/csharp-lib/Aiomsg/Aiomsg.csproj" />
+</ItemGroup>
+```
+
+### Lua
+
+LuaRocks can install the rockspec from this repository at a pinned revision:
+
+```sh
+luarocks install https://raw.githubusercontent.com/cjrh/aiomsg/<git-ref>/lua-lib/aiomsg-1.0-1.rockspec
+```
+
+For a local checkout or submodule:
+
+```sh
+luarocks make vendor/aiomsg/lua-lib/aiomsg-1.0-1.rockspec
+```
+
 The code examples throughout this document are in Python (the reference), but
 the design principles, message-distribution patterns, and developer experience
 described below are shared by every implementation. Only the spelling differs
