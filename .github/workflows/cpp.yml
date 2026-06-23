@@ -30,7 +30,7 @@ jobs:
         # configure; cpp-lib-sync has no extra dependency.
         dir: [cpp-lib-sync, cpp-lib-async]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install OpenSSL headers
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - uses: extractions/setup-just@v4
