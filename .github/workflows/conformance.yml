@@ -11,6 +11,7 @@ on:
       - master
     paths:
       - 'python-lib/**'
+      - 'python-lib-blocking/**'
       - 'rust-lib-async/**'
       - 'rust-lib-sync/**'
       - 'golang-lib/**'
@@ -26,6 +27,7 @@ on:
       - master
     paths:
       - 'python-lib/**'
+      - 'python-lib-blocking/**'
       - 'rust-lib-async/**'
       - 'rust-lib-sync/**'
       - 'golang-lib/**'

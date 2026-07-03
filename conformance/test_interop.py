@@ -21,6 +21,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_LIB = REPO_ROOT / "python-lib"
+PYTHON_BLOCKING_LIB = REPO_ROOT / "python-lib-blocking"
 RUST_ASYNC_DIR = REPO_ROOT / "rust-lib-async"
 RUST_SYNC_DIR = REPO_ROOT / "rust-lib-sync"
 GOLANG_DIR = REPO_ROOT / "golang-lib"
@@ -33,6 +34,7 @@ JS_DIR = REPO_ROOT / "javascript-lib"
 CSHARP_DIR = REPO_ROOT / "csharp-lib"
 LUA_DIR = REPO_ROOT / "lua-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
+PY_BLOCKING_AGENT = REPO_ROOT / "conformance" / "agents" / "python_blocking_agent.py"
 JS_AGENT = JS_DIR / "conformance_agent.js"
 LUA_AGENT = LUA_DIR / "conformance_agent.lua"
 # Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
@@ -116,6 +118,14 @@ SCENARIOS = [
     ("go", "connect", "csharp", "bind", "roundrobin", "at-least-once"),
     ("lua", "bind", "rust", "connect", "publish", "at-most-once"),
     ("javascript", "connect", "lua", "bind", "roundrobin", "at-least-once"),
+    # Blocking Python interop with async Python and Rust (every role / mode /
+    # delivery combination that the other sync ports also cover).
+    ("python-blocking", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "python-blocking", "connect", "roundrobin", "at-most-once"),
+    ("python-blocking", "connect", "rust", "bind", "roundrobin", "at-most-once"),
+    ("rust", "bind", "python-blocking", "connect", "publish", "at-most-once"),
+    ("python-blocking", "connect", "python", "bind", "roundrobin", "at-least-once"),
+    ("python", "connect", "python-blocking", "bind", "roundrobin", "at-least-once"),
 ]
 
 # The same matrix, but over TLS — proving every implementation speaks the
@@ -124,6 +134,7 @@ SCENARIOS = [
 # client) side, both Rust crates against each other, and one at-least-once path.
 LANGUAGES = [
     "python",
+    "python-blocking",
     "rust",
     "rust-sync",
     "go",
@@ -160,6 +171,10 @@ TLS_SCENARIOS = [
     # Cross-native TLS interop.
     ("c", "connect", "cpp-async", "bind", "roundrobin", "at-most-once"),
     ("java", "bind", "zig", "connect", "roundrobin", "at-least-once"),
+    # Blocking Python speaks TLS via ssl.SSLSocket (not asyncio's MemoryBIO);
+    # prove both its bind (TLS server) and connect (TLS client) sides.
+    ("python-blocking", "bind", "python", "connect", "publish", "at-most-once"),
+    ("python", "bind", "python-blocking", "connect", "roundrobin", "at-least-once"),
 ]
 
 # Each parametrized case is (scenario tuple, tls flag).
@@ -349,7 +364,8 @@ def agents(
 
     A value is either a binary path (string) or a full command prefix (list,
     e.g. for Java). Keep these keys in lockstep with SCENARIOS; `_agent_cmd`
-    handles only `python` specially and looks up every other language here.
+    handles only `python` and `python-blocking` specially and looks up every
+    other language here.
     """
     return {
         "rust": rust_agent_exe,
@@ -402,18 +418,24 @@ def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery, tls=Fal
             "--tls-ca", str(TLS_CERT),
         ]
     if lang == "python":
-        return [sys.executable, str(PY_AGENT), *flags], _python_env()
+        return [sys.executable, str(PY_AGENT), *flags], _python_env(PYTHON_LIB)
+    if lang == "python-blocking":
+        return (
+            [sys.executable, str(PY_BLOCKING_AGENT), *flags],
+            _python_env(PYTHON_BLOCKING_LIB),
+        )
     # A native agent is either a binary path (str) or a command prefix (list).
     invocation = exes[lang]
     prefix = invocation if isinstance(invocation, list) else [invocation]
     return [*prefix, *flags], None
 
 
-def _python_env():
+def _python_env(lib_dir):
     env = dict(os.environ)
-    # aiomsg is stdlib-only, so PYTHONPATH is enough — no install required.
+    # Both Python packages are stdlib-only, so PYTHONPATH is enough — no
+    # install required.
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(PYTHON_LIB) + (os.pathsep + existing if existing else "")
+    env["PYTHONPATH"] = str(lib_dir) + (os.pathsep + existing if existing else "")
     return env
 
 
