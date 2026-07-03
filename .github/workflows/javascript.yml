@@ -1,0 +1,37 @@
+name: JavaScript CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'javascript-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/javascript.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'javascript-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/javascript.yml'
+
+defaults:
+  run:
+    working-directory: javascript-lib
+
+jobs:
+  test:
+    name: Test (node --test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - uses: extractions/setup-just@v4
+      # `just test` runs `node --test`: protocol unit tests + the in-process
+      # TCP/TLS integration test. Zero runtime dependencies, so no install step.
+      - name: Test
+        run: just test
