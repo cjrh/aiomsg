@@ -114,6 +114,7 @@ export class Socket {
     this.inbox = new Inbox();
     this.servers = new Set();
     this.sockets = new Set(); // every socket we own, for teardown
+    this.reconnectTimers = new Set(); // pending reconnect timers, for teardown
     this.closed = false;
   }
 
@@ -193,6 +194,8 @@ export class Socket {
     this.closed = true;
     for (const { timer } of this.pending.values()) clearTimeout(timer);
     this.pending.clear();
+    for (const timer of this.reconnectTimers) clearTimeout(timer);
+    this.reconnectTimers.clear();
     for (const server of this.servers) server.close();
     for (const socket of this.sockets) socket.destroy();
     this.inbox.close();
@@ -202,8 +205,17 @@ export class Socket {
 
   #connectLoop(host, port, tlsOpts) {
     if (this.closed) return;
+    // The retry timer stays ref'd so a connect-mode socket keeps the process
+    // alive between attempts (an unref'd timer lets the event loop drain and
+    // the process silently exit while the peer is still coming up); close()
+    // cancels it via reconnectTimers.
     const retry = () => {
-      if (!this.closed) setTimeout(() => this.#connectLoop(host, port, tlsOpts), RECONNECT_MS).unref();
+      if (this.closed) return;
+      const timer = setTimeout(() => {
+        this.reconnectTimers.delete(timer);
+        this.#connectLoop(host, port, tlsOpts);
+      }, RECONNECT_MS);
+      this.reconnectTimers.add(timer);
     };
 
     const socket = tlsOpts
