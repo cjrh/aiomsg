@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 use tracing::{debug, trace};
 
 use crate::protocol::{self, Envelope, Identity, MsgId};
@@ -20,8 +21,9 @@ const RESEND_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_RETRIES: u32 = 5;
 
 /// Messages the broker processes. Every input to the broker — user sends,
-/// connection lifecycle events, received frames, resend timers — is one of
-/// these.
+/// connection lifecycle events, received frames — is one of these. Resend
+/// timers are handled internally by the broker's run loop rather than
+/// round-tripping through this channel (see `deadlines` on [`Broker`]).
 pub(crate) enum Command {
     /// A user-level send. `identity` set means "to this peer only".
     Send {
@@ -42,8 +44,6 @@ pub(crate) enum Command {
         identity: Identity,
         envelope: Envelope,
     },
-    /// A resend timer fired for an in-flight DATA_REQ.
-    ResendTimeout { msg_id: MsgId },
     /// Stop.
     Close,
 }
@@ -53,14 +53,11 @@ struct Pending {
     identity: Option<Identity>,
     data: Bytes,
     retries: u32,
-    cancel: Option<oneshot::Sender<()>>,
 }
 
 pub(crate) struct Broker {
     send_mode: SendMode,
     delivery: DeliveryGuarantee,
-    /// The broker's own command sender, cloned into resend-timer tasks.
-    cmd_tx: mpsc::UnboundedSender<Command>,
     /// Where received application payloads are delivered (to `Socket::recv`).
     recv_tx: mpsc::UnboundedSender<(Identity, Bytes)>,
     /// Active connections, keyed by peer identity, each value a channel into
@@ -71,44 +68,73 @@ pub(crate) struct Broker {
     rr_cursor: usize,
     /// Messages sent while no peers were connected, flushed on the next connect.
     buffer: VecDeque<(Option<Identity>, Bytes)>,
+    /// In-flight `AT_LEAST_ONCE` messages awaiting an ACK, keyed by msg_id.
     pending: HashMap<MsgId, Pending>,
+    /// Resend deadlines in fire order. `RESEND_TIMEOUT` is constant and every
+    /// entry is pushed at `Instant::now() + RESEND_TIMEOUT` from within this
+    /// same single-threaded loop, so insertion order is already deadline
+    /// order — a `VecDeque` is a min-heap here for free. An entry whose
+    /// msg_id is no longer in `pending` when it reaches the front (because
+    /// the ACK arrived, or a retry already replaced it with a fresh msg_id)
+    /// is simply skipped.
+    deadlines: VecDeque<(Instant, MsgId)>,
+    /// Salt distinguishing this broker's msg_ids from any other broker's;
+    /// combined with `msg_id_counter` to fill the 16-byte `MsgId`. Only needs
+    /// to be unique per sender, not globally, so one random draw at startup
+    /// plus a monotonic counter is enough — no per-message RNG call.
+    msg_id_salt: [u8; 8],
+    msg_id_counter: u64,
 }
 
 impl Broker {
     pub(crate) fn new(
         send_mode: SendMode,
         delivery: DeliveryGuarantee,
-        cmd_tx: mpsc::UnboundedSender<Command>,
         recv_tx: mpsc::UnboundedSender<(Identity, Bytes)>,
     ) -> Self {
+        let salt = uuid::Uuid::new_v4();
+        let msg_id_salt: [u8; 8] = salt.as_bytes()[..8].try_into().unwrap();
         Broker {
             send_mode,
             delivery,
-            cmd_tx,
             recv_tx,
             conns: HashMap::new(),
             order: Vec::new(),
             rr_cursor: 0,
             buffer: VecDeque::new(),
             pending: HashMap::new(),
+            deadlines: VecDeque::new(),
+            msg_id_salt,
+            msg_id_counter: 0,
         }
     }
 
     pub(crate) async fn run(mut self, mut cmd_rx: mpsc::UnboundedReceiver<Command>) {
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                Command::Send { identity, data } => self.handle_send(identity, data),
-                Command::ConnectionUp {
-                    identity,
-                    writer,
-                    accept,
-                } => self.handle_up(identity, writer, accept),
-                Command::ConnectionDown { identity } => self.handle_down(identity),
-                Command::Received { identity, envelope } => {
-                    self.handle_received(identity, envelope)
+        loop {
+            // Next resend deadline, if any in-flight message is awaiting one.
+            // Guarded by `!self.deadlines.is_empty()` below, so the dummy
+            // `Instant::now()` fallback (needed only for the expression to
+            // type-check) is never actually polled.
+            let next_deadline = self
+                .deadlines
+                .front()
+                .map_or_else(Instant::now, |(deadline, _)| *deadline);
+
+            tokio::select! {
+                cmd = cmd_rx.recv() => match cmd {
+                    Some(Command::Send { identity, data }) => self.handle_send(identity, data),
+                    Some(Command::ConnectionUp { identity, writer, accept }) => {
+                        self.handle_up(identity, writer, accept)
+                    }
+                    Some(Command::ConnectionDown { identity }) => self.handle_down(identity),
+                    Some(Command::Received { identity, envelope }) => {
+                        self.handle_received(identity, envelope)
+                    }
+                    Some(Command::Close) | None => break,
+                },
+                () = tokio::time::sleep_until(next_deadline), if !self.deadlines.is_empty() => {
+                    self.fire_due_resends();
                 }
-                Command::ResendTimeout { msg_id } => self.handle_resend(msg_id),
-                Command::Close => break,
             }
         }
         // Returning drops `conns` (every connection writer sender) and
@@ -131,20 +157,13 @@ impl Broker {
             && (identity.is_some() || self.send_mode == SendMode::RoundRobin);
 
         if at_least_once {
-            let msg_id = *uuid::Uuid::new_v4().as_bytes();
+            let msg_id = self.next_msg_id();
             let envelope = protocol::data_req(&msg_id, &data);
 
-            // Schedule a resend that fires unless an ACK cancels it first.
-            let (cancel_tx, cancel_rx) = oneshot::channel();
-            let cmd_tx = self.cmd_tx.clone();
-            tokio::spawn(async move {
-                tokio::select! {
-                    _ = tokio::time::sleep(RESEND_TIMEOUT) => {
-                        let _ = cmd_tx.send(Command::ResendTimeout { msg_id });
-                    }
-                    _ = cancel_rx => {}
-                }
-            });
+            // Schedule a resend; it fires unless an ACK removes `msg_id` from
+            // `pending` first (see `fire_due_resends`).
+            self.deadlines
+                .push_back((Instant::now() + RESEND_TIMEOUT, msg_id));
 
             self.pending.insert(
                 msg_id,
@@ -152,13 +171,25 @@ impl Broker {
                     identity,
                     data,
                     retries,
-                    cancel: Some(cancel_tx),
                 },
             );
             self.route(identity, envelope);
         } else {
             self.route(identity, protocol::data(&data));
         }
+    }
+
+    /// The next msg_id for an `AT_LEAST_ONCE` send: this broker's startup
+    /// salt followed by a monotonic counter. Only needs to be unique among
+    /// messages from this sender, which the counter guarantees without a
+    /// per-message RNG call.
+    fn next_msg_id(&mut self) -> MsgId {
+        let counter = self.msg_id_counter;
+        self.msg_id_counter = self.msg_id_counter.wrapping_add(1);
+        let mut id = [0u8; 16];
+        id[..8].copy_from_slice(&self.msg_id_salt);
+        id[8..].copy_from_slice(&counter.to_be_bytes());
+        id
     }
 
     /// Deliver an already-encoded envelope to the appropriate connection(s).
@@ -240,11 +271,10 @@ impl Broker {
                 self.route(Some(identity), protocol::ack(&msg_id));
             }
             Envelope::Ack { msg_id } => {
-                if let Some(mut pending) = self.pending.remove(&msg_id) {
-                    if let Some(cancel) = pending.cancel.take() {
-                        let _ = cancel.send(());
-                    }
-                }
+                // Just drop the bookkeeping; the matching `deadlines` entry
+                // is skipped as stale when it reaches the front (see
+                // `fire_due_resends`).
+                self.pending.remove(&msg_id);
             }
             // HELLO / HEARTBEAT are handled in the connection layer and never
             // reach the broker.
@@ -252,18 +282,35 @@ impl Broker {
         }
     }
 
-    fn handle_resend(&mut self, msg_id: MsgId) {
-        if let Some(pending) = self.pending.remove(&msg_id) {
-            if pending.retries == 0 {
-                debug!("max retries reached; dropping message");
-                return;
+    /// Pop and process every deadline that has already passed. Called once
+    /// per timer fire; loops in case several deadlines are due in the same
+    /// tick (e.g. after a burst of `AT_LEAST_ONCE` sends).
+    fn fire_due_resends(&mut self) {
+        let now = Instant::now();
+        while let Some(&(deadline, msg_id)) = self.deadlines.front() {
+            if deadline > now {
+                break;
             }
-            if self.conns.is_empty() {
-                self.buffer.push_back((pending.identity, pending.data));
-                return;
-            }
-            self.transmit(pending.identity, pending.data, pending.retries - 1);
+            self.deadlines.pop_front();
+            self.fire_resend(msg_id);
         }
+    }
+
+    fn fire_resend(&mut self, msg_id: MsgId) {
+        // Absent means the ACK already arrived (or a previous retry already
+        // superseded this msg_id) — nothing to do.
+        let Some(pending) = self.pending.remove(&msg_id) else {
+            return;
+        };
+        if pending.retries == 0 {
+            debug!("max retries reached; dropping message");
+            return;
+        }
+        if self.conns.is_empty() {
+            self.buffer.push_back((pending.identity, pending.data));
+            return;
+        }
+        self.transmit(pending.identity, pending.data, pending.retries - 1);
     }
 }
 

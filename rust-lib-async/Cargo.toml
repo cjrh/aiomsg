@@ -33,8 +33,25 @@ tokio-stream = "0.1"
 # Test/example helpers: generate self-signed certs and read PEM files. Pure Rust.
 rcgen = "0.13"
 rustls-pemfile = "2"
+# Benchmark harness (default features: cargo_bench_support + plotters + rayon).
+criterion = "0.5"
 
 # The TLS demo only builds when the `tls` feature is on.
 [[example]]
 name = "tls"
 required-features = ["tls"]
+
+# Throughput/framing benchmarks. Uses bind_tls/connect_tls, so it needs `tls`
+# (a default feature); run with the default `cargo bench`.
+[[bench]]
+name = "throughput"
+harness = false
+required-features = ["tls"]
+
+# Optimized release builds: this crate exists for performance-sensitive
+# messaging, so trade compile time for better cross-module inlining.
+# `panic = "abort"` is deliberately NOT set: the sync crate relies on
+# unwind-and-join semantics in its worker threads.
+[profile.release]
+lto = "thin"
+codegen-units = 1
