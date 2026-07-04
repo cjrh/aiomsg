@@ -133,6 +133,54 @@ fn at_least_once_delivers_and_acks() {
     client.close();
 }
 
+/// An unacknowledged at-least-once message is resent after the resend timeout,
+/// with a fresh message id and the same payload — exercising the single broker
+/// timer thread end to end (arm on send, fire on timeout, re-transmit).
+#[test]
+fn at_least_once_resends_when_unacked() {
+    use std::net::TcpStream;
+
+    use aiomsg::protocol::{decode, hello, read_frame, write_frame, Envelope};
+    use aiomsg::{Bytes, MsgId};
+
+    /// Read frames from the raw peer until a `DataReq` arrives, skipping the
+    /// sender's HELLO and periodic heartbeats.
+    fn next_data_req(peer: &mut TcpStream) -> (MsgId, Bytes) {
+        loop {
+            let frame = read_frame(peer)
+                .expect("read failed")
+                .expect("connection closed before a DataReq arrived");
+            if let Some(Envelope::DataReq { msg_id, payload }) = decode(&frame) {
+                return (msg_id, payload);
+            }
+        }
+    }
+
+    let sender = Socket::builder()
+        .send_mode(SendMode::RoundRobin)
+        .delivery_guarantee(DeliveryGuarantee::AtLeastOnce)
+        .build();
+    let addr = sender.bind("127.0.0.1:0").unwrap();
+
+    // Buffered until a peer connects, then delivered as a DataReq.
+    sender.send("resend-me").unwrap();
+
+    // A raw protocol peer that completes the handshake, receives the DataReq,
+    // and deliberately never acks, forcing the sender's timer to resend.
+    let mut peer = TcpStream::connect(addr).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+    write_frame(&mut peer, &hello(&[42u8; 16])).unwrap();
+
+    let (first_id, payload) = next_data_req(&mut peer);
+    assert_eq!(&payload[..], b"resend-me");
+    // The resend arrives after RESEND_TIMEOUT (5s) with a fresh id.
+    let (resend_id, resend_payload) = next_data_req(&mut peer);
+    assert_eq!(resend_payload, payload, "payload preserved across resend");
+    assert_ne!(resend_id, first_id, "resend uses a fresh msg id");
+
+    sender.close();
+}
+
 #[test]
 fn messages_iterator_yields_in_order() {
     let server = Socket::builder().send_mode(SendMode::Publish).build();

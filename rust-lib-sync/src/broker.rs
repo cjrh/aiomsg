@@ -4,20 +4,123 @@
 //! round-robin cursor, send buffer, and in-flight ack table are touched from
 //! one thread only.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
-use crate::protocol::{self, Envelope, Identity, MsgId};
+use crate::protocol::{self, Envelope, Identity, MsgId, MSG_ID_SIZE};
 use crate::{DeliveryGuarantee, SendMode};
 
 const RESEND_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_RETRIES: u32 = 5;
+
+/// Messages the broker's single resend-timer thread accepts.
+enum TimerMsg {
+    /// Start a `RESEND_TIMEOUT` countdown for `msg_id`; it fires a
+    /// `Command::ResendTimeout` unless cancelled first.
+    Arm(MsgId),
+    /// The message was acknowledged — drop its countdown.
+    Cancel(MsgId),
+    /// Stop the timer thread.
+    Shutdown,
+}
+
+/// A single background thread that fires `Command::ResendTimeout` when an
+/// at-least-once message stays unacknowledged for `RESEND_TIMEOUT`. It replaces
+/// the previous thread-per-message design: the broker [`arm`](Self::arm)s a
+/// deadline when it sends a reliable message and [`cancel`](Self::cancel)s it on
+/// the matching ack. Dropping it stops and joins the thread.
+struct ResendTimers {
+    tx: Sender<TimerMsg>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl ResendTimers {
+    fn spawn(cmd_tx: Sender<Command>) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<TimerMsg>();
+        let handle = thread::spawn(move || timer_loop(rx, cmd_tx));
+        ResendTimers {
+            tx,
+            handle: Some(handle),
+        }
+    }
+
+    fn arm(&self, msg_id: MsgId) {
+        let _ = self.tx.send(TimerMsg::Arm(msg_id));
+    }
+
+    fn cancel(&self, msg_id: MsgId) {
+        let _ = self.tx.send(TimerMsg::Cancel(msg_id));
+    }
+}
+
+impl Drop for ResendTimers {
+    fn drop(&mut self) {
+        // Ask the thread to stop and wait for it, so it never outlives the
+        // broker. A failed send just means it has already exited.
+        let _ = self.tx.send(TimerMsg::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// The resend-timer thread body. Because every deadline is exactly
+/// `RESEND_TIMEOUT` after it is armed, deadlines are produced in nondecreasing
+/// order, so a plain `VecDeque` keeps them sorted with the soonest at the front.
+/// `armed` holds the ids still awaiting an ack: a `Cancel` removes an id from it,
+/// leaving the deadline entry as a tombstone that is discarded (not fired) when
+/// it reaches the front. Cancellation is therefore O(1) and never reorders the
+/// queue.
+fn timer_loop(rx: Receiver<TimerMsg>, cmd_tx: Sender<Command>) {
+    let mut deadlines: VecDeque<(Instant, MsgId)> = VecDeque::new();
+    let mut armed: HashSet<MsgId> = HashSet::new();
+
+    loop {
+        // Wait for a message, but no longer than the soonest deadline.
+        let msg = match deadlines.front() {
+            Some(&(deadline, _)) => {
+                let wait = deadline.saturating_duration_since(Instant::now());
+                match rx.recv_timeout(wait) {
+                    Ok(msg) => Some(msg),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            None => match rx.recv() {
+                Ok(msg) => Some(msg),
+                Err(_) => break,
+            },
+        };
+
+        match msg {
+            Some(TimerMsg::Arm(id)) => {
+                deadlines.push_back((Instant::now() + RESEND_TIMEOUT, id));
+                armed.insert(id);
+            }
+            Some(TimerMsg::Cancel(id)) => {
+                armed.remove(&id);
+            }
+            Some(TimerMsg::Shutdown) => break,
+            None => {}
+        }
+
+        // Fire every deadline now due, skipping ids that were cancelled.
+        let now = Instant::now();
+        while let Some(&(deadline, id)) = deadlines.front() {
+            if deadline > now {
+                break;
+            }
+            deadlines.pop_front();
+            if armed.remove(&id) && cmd_tx.send(Command::ResendTimeout { msg_id: id }).is_err() {
+                return; // broker gone; nothing left to time
+            }
+        }
+    }
+}
 
 /// Messages the broker processes.
 pub(crate) enum Command {
@@ -47,19 +150,26 @@ struct Pending {
     identity: Option<Identity>,
     data: Bytes,
     retries: u32,
-    cancel: Arc<AtomicBool>,
 }
 
 pub(crate) struct Broker {
     send_mode: SendMode,
     delivery: DeliveryGuarantee,
-    cmd_tx: Sender<Command>,
     recv_tx: Sender<(Identity, Bytes)>,
     conns: HashMap<Identity, Sender<Bytes>>,
     order: Vec<Identity>,
     rr_cursor: usize,
     buffer: VecDeque<(Option<Identity>, Bytes)>,
     pending: HashMap<MsgId, Pending>,
+    // At-least-once message ids: `salt` is 8 random bytes fixed at startup that
+    // distinguish this broker's ids from any other process's; `next_id` is a
+    // monotonic counter making each id unique within this broker. Together they
+    // fill the 16-byte `MsgId`, replacing a per-message UUID.
+    salt: [u8; 8],
+    next_id: u64,
+    // The one resend-timer thread. Declared last so it is dropped (and joined)
+    // after the fields whose senders it may still reference.
+    timer: ResendTimers,
 }
 
 impl Broker {
@@ -69,16 +179,24 @@ impl Broker {
         cmd_tx: Sender<Command>,
         recv_tx: Sender<(Identity, Bytes)>,
     ) -> Self {
+        let mut salt = [0u8; 8];
+        salt.copy_from_slice(&uuid::Uuid::new_v4().as_bytes()[..8]);
+        // The timer thread owns the only broker-held clone of `cmd_tx`; that is
+        // enough to keep the command channel alive, so the broker still exits
+        // only on `Command::Close` (not on an incidental sender drop).
+        let timer = ResendTimers::spawn(cmd_tx);
         Broker {
             send_mode,
             delivery,
-            cmd_tx,
             recv_tx,
             conns: HashMap::new(),
             order: Vec::new(),
             rr_cursor: 0,
             buffer: VecDeque::new(),
             pending: HashMap::new(),
+            salt,
+            next_id: 0,
+            timer,
         }
     }
 
@@ -99,12 +217,9 @@ impl Broker {
                 Command::Close => break,
             }
         }
-        // Cancel any outstanding resend timers; dropping `self` drops the writer
-        // senders (ending writer threads) and `recv_tx` (ending the receive
-        // iterator).
-        for p in self.pending.values() {
-            p.cancel.store(true, Ordering::SeqCst);
-        }
+        // Dropping `self` stops and joins the resend-timer thread
+        // (`ResendTimers::drop`), drops the writer senders (ending the writer
+        // threads), and drops `recv_tx` (ending the receive iterator).
     }
 
     fn handle_send(&mut self, identity: Option<Identity>, data: Bytes) {
@@ -120,51 +235,54 @@ impl Broker {
             && (identity.is_some() || self.send_mode == SendMode::RoundRobin);
 
         if at_least_once {
-            let msg_id = *uuid::Uuid::new_v4().as_bytes();
-            let envelope = protocol::data_req(&msg_id, &data);
-
-            let cancel = Arc::new(AtomicBool::new(false));
-            let cancel_for_timer = cancel.clone();
-            let cmd_tx = self.cmd_tx.clone();
-            thread::spawn(move || {
-                thread::sleep(RESEND_TIMEOUT);
-                if !cancel_for_timer.load(Ordering::SeqCst) {
-                    let _ = cmd_tx.send(Command::ResendTimeout { msg_id });
-                }
-            });
-
+            let msg_id = self.next_msg_id();
+            let frame = protocol::data_req(&msg_id, &data);
+            self.timer.arm(msg_id);
             self.pending.insert(
                 msg_id,
                 Pending {
                     identity,
                     data,
                     retries,
-                    cancel,
                 },
             );
-            self.route(identity, envelope);
+            self.route(identity, frame);
         } else {
             self.route(identity, protocol::data(&data));
         }
     }
 
-    fn route(&mut self, target: Option<Identity>, envelope: Bytes) {
+    /// The next unique message id: this broker's 8-byte salt followed by an
+    /// 8-byte big-endian counter. Never reused for the life of the broker, so a
+    /// stale resend timer can never match a later message.
+    fn next_msg_id(&mut self) -> MsgId {
+        let mut id = [0u8; MSG_ID_SIZE];
+        id[..8].copy_from_slice(&self.salt);
+        id[8..].copy_from_slice(&self.next_id.to_be_bytes());
+        self.next_id = self.next_id.wrapping_add(1);
+        id
+    }
+
+    /// `frame` is a complete, already length-prefixed frame (built by one of
+    /// the `protocol` encoders); the writer thread on the other end of `tx`
+    /// sends it to the socket unchanged.
+    fn route(&mut self, target: Option<Identity>, frame: Bytes) {
         match target {
             Some(id) => {
                 if let Some(tx) = self.conns.get(&id) {
-                    let _ = tx.send(envelope);
+                    let _ = tx.send(frame);
                 }
             }
             None => match self.send_mode {
                 SendMode::Publish => {
                     for tx in self.conns.values() {
-                        let _ = tx.send(envelope.clone());
+                        let _ = tx.send(frame.clone());
                     }
                 }
                 SendMode::RoundRobin => {
                     if let Some(id) = self.next_round_robin() {
                         if let Some(tx) = self.conns.get(&id) {
-                            let _ = tx.send(envelope);
+                            let _ = tx.send(frame);
                         }
                     }
                 }
@@ -215,8 +333,8 @@ impl Broker {
                 self.route(Some(identity), protocol::ack(&msg_id));
             }
             Envelope::Ack { msg_id } => {
-                if let Some(pending) = self.pending.remove(&msg_id) {
-                    pending.cancel.store(true, Ordering::SeqCst);
+                if self.pending.remove(&msg_id).is_some() {
+                    self.timer.cancel(msg_id);
                 }
             }
             Envelope::Hello { .. } | Envelope::Heartbeat => {}

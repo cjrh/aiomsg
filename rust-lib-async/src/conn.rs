@@ -155,7 +155,7 @@ where
     protocol::write_frame(&mut write_half, &protocol::hello(&my_identity)).await?;
     let peer_identity = match protocol::read_frame(&mut read_half).await? {
         None => return Ok(()), // closed during handshake
-        Some(frame) => match protocol::decode(&frame) {
+        Some(frame) => match protocol::decode(frame) {
             Some(Envelope::Hello { version, identity }) => {
                 if version != protocol::PROTOCOL_VERSION {
                     warn!("unsupported protocol version {version}; closing");
@@ -188,9 +188,24 @@ where
         return Ok(());
     }
 
-    // --- Writer task: drains the broker's queue, beating on idle. -----------
+    // --- Writer task: drains the broker's queue, beating at a fixed cadence. -
+    // A fresh `sleep(HEARTBEAT_INTERVAL)` per loop iteration would register
+    // and cancel a timer-wheel entry on every single message written, which
+    // dominates timer-wheel churn on a busy connection. `interval()` instead
+    // registers one timer that we simply keep polling; `MissedTickBehavior::
+    // Delay` means a burst of traffic can't cause a pile of instantly-ready
+    // ticks afterwards — the next heartbeat is always >= HEARTBEAT_INTERVAL
+    // after the tick actually fires, not after the *scheduled* time. Net
+    // effect on the wire is unchanged: peers still see a heartbeat roughly
+    // every HEARTBEAT_INTERVAL regardless of application traffic, which is
+    // what they rely on for liveness, and a 5-byte frame is cheap enough that
+    // sending it even during active traffic is not worth optimizing away.
     let mut writer_shutdown = shutdown.clone();
     let writer = tokio::spawn(async move {
+        let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat.tick().await; // first tick fires immediately; consume it
+
         loop {
             tokio::select! {
                 _ = writer_shutdown.recv() => break,
@@ -202,7 +217,7 @@ where
                     }
                     None => break, // broker dropped this connection
                 },
-                _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {
+                _ = heartbeat.tick() => {
                     if protocol::write_frame(&mut write_half, &protocol::heartbeat()).await.is_err() {
                         break;
                     }
@@ -219,7 +234,7 @@ where
                 Err(_) => { debug!("heartbeat timeout; closing connection"); break; }
                 Ok(Ok(None)) => break,   // clean close
                 Ok(Err(_)) => break,     // io error
-                Ok(Ok(Some(frame))) => match protocol::decode(&frame) {
+                Ok(Ok(Some(frame))) => match protocol::decode(frame) {
                     // Heartbeats only reset the timeout; HELLO is unexpected
                     // here; unknown types are ignored.
                     Some(Envelope::Heartbeat) | Some(Envelope::Hello { .. }) | None => continue,

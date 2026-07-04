@@ -31,27 +31,46 @@ pub enum Envelope {
     Ack { msg_id: MsgId },
 }
 
+// Each encoder below builds one contiguous, already-framed `Bytes`: a 4-byte
+// big-endian `u32` length prefix (counting everything that follows it) plus
+// the envelope itself. Framing the length in here — rather than in
+// `write_frame` — means a send is exactly one `write_all` of one buffer, with
+// no second allocation/copy to prepend the prefix at write time.
+
+/// Write the frame's length prefix (`body_len` = everything after the
+/// prefix) into `b`, which must already have `4 + body_len` bytes reserved.
+fn put_len_prefix(b: &mut BytesMut, body_len: usize) {
+    b.put_u32(body_len as u32);
+}
+
 pub fn hello(identity: &Identity) -> Bytes {
-    let mut b = BytesMut::with_capacity(2 + IDENTITY_SIZE);
+    let body_len = 2 + IDENTITY_SIZE;
+    let mut b = BytesMut::with_capacity(4 + body_len);
+    put_len_prefix(&mut b, body_len);
     b.put_u8(T_HELLO);
     b.put_u8(PROTOCOL_VERSION);
     b.put_slice(identity);
     b.freeze()
 }
 
+/// The complete 5-byte HEARTBEAT frame: `[len=1][type=T_HEARTBEAT]`.
 pub fn heartbeat() -> Bytes {
-    Bytes::from_static(&[T_HEARTBEAT])
+    Bytes::from_static(&[0, 0, 0, 1, T_HEARTBEAT])
 }
 
 pub fn data(payload: &[u8]) -> Bytes {
-    let mut b = BytesMut::with_capacity(1 + payload.len());
+    let body_len = 1 + payload.len();
+    let mut b = BytesMut::with_capacity(4 + body_len);
+    put_len_prefix(&mut b, body_len);
     b.put_u8(T_DATA);
     b.put_slice(payload);
     b.freeze()
 }
 
 pub fn data_req(msg_id: &MsgId, payload: &[u8]) -> Bytes {
-    let mut b = BytesMut::with_capacity(1 + MSG_ID_SIZE + payload.len());
+    let body_len = 1 + MSG_ID_SIZE + payload.len();
+    let mut b = BytesMut::with_capacity(4 + body_len);
+    put_len_prefix(&mut b, body_len);
     b.put_u8(T_DATA_REQ);
     b.put_slice(msg_id);
     b.put_slice(payload);
@@ -59,15 +78,24 @@ pub fn data_req(msg_id: &MsgId, payload: &[u8]) -> Bytes {
 }
 
 pub fn ack(msg_id: &MsgId) -> Bytes {
-    let mut b = BytesMut::with_capacity(1 + MSG_ID_SIZE);
+    let body_len = 1 + MSG_ID_SIZE;
+    let mut b = BytesMut::with_capacity(4 + body_len);
+    put_len_prefix(&mut b, body_len);
     b.put_u8(T_ACK);
     b.put_slice(msg_id);
     b.freeze()
 }
 
 /// Decode one envelope. `None` for empty, truncated, or unknown type.
-pub fn decode(buf: &[u8]) -> Option<Envelope> {
-    let (&t, body) = buf.split_first()?;
+///
+/// `frame` holds the envelope bytes only (the length prefix has already been
+/// stripped by the framing layer). `Data`/`DataReq` payloads are sliced out
+/// of `frame` with [`Bytes::slice`] — a refcount bump, not a copy — so the
+/// caller's already-received buffer is reused all the way out to the
+/// application.
+pub fn decode(frame: &Bytes) -> Option<Envelope> {
+    let &t = frame.first()?;
+    let body = frame.slice(1..);
     match t {
         T_HELLO => {
             if body.len() < 1 + IDENTITY_SIZE {
@@ -79,9 +107,7 @@ pub fn decode(buf: &[u8]) -> Option<Envelope> {
             Some(Envelope::Hello { version, identity })
         }
         T_HEARTBEAT => Some(Envelope::Heartbeat),
-        T_DATA => Some(Envelope::Data {
-            payload: Bytes::copy_from_slice(body),
-        }),
+        T_DATA => Some(Envelope::Data { payload: body }),
         T_DATA_REQ => {
             if body.len() < MSG_ID_SIZE {
                 return None;
@@ -90,7 +116,7 @@ pub fn decode(buf: &[u8]) -> Option<Envelope> {
             msg_id.copy_from_slice(&body[..MSG_ID_SIZE]);
             Some(Envelope::DataReq {
                 msg_id,
-                payload: Bytes::copy_from_slice(&body[MSG_ID_SIZE..]),
+                payload: body.slice(MSG_ID_SIZE..),
             })
         }
         T_ACK => {
@@ -105,16 +131,16 @@ pub fn decode(buf: &[u8]) -> Option<Envelope> {
     }
 }
 
-/// Write one frame: a big-endian `u32` length prefix followed by `envelope`.
-pub fn write_frame<W: Write>(w: &mut W, envelope: &[u8]) -> io::Result<()> {
-    let mut buf = Vec::with_capacity(4 + envelope.len());
-    buf.extend_from_slice(&(envelope.len() as u32).to_be_bytes());
-    buf.extend_from_slice(envelope);
-    w.write_all(&buf)
+/// Write one frame. `frame` is already a complete, length-prefixed frame (see
+/// the encoders above), so this is a single `write_all` — no allocation, no
+/// copy.
+pub fn write_frame<W: Write>(w: &mut W, frame: &[u8]) -> io::Result<()> {
+    w.write_all(frame)
 }
 
-/// Read one frame. `Ok(None)` on a clean close at a frame boundary.
-pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
+/// Read one frame, returning just the envelope bytes (length prefix
+/// stripped). `Ok(None)` on a clean close at a frame boundary.
+pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Bytes>> {
     let mut len_buf = [0u8; 4];
     match r.read_exact(&mut len_buf) {
         Ok(()) => {}
@@ -124,7 +150,7 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
     match r.read_exact(&mut buf) {
-        Ok(()) => Ok(Some(buf)),
+        Ok(()) => Ok(Some(Bytes::from(buf))),
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
         Err(e) => Err(e),
     }
@@ -132,8 +158,9 @@ pub fn read_frame<R: Read>(r: &mut R) -> io::Result<Option<Vec<u8>>> {
 
 /// The outcome of a single read attempt via [`FrameDecoder`].
 pub enum Read1 {
-    /// A complete frame is available.
-    Frame(Vec<u8>),
+    /// A complete frame is available (envelope bytes, length prefix
+    /// stripped).
+    Frame(Bytes),
     /// No complete frame yet — the read timed out or returned a partial frame.
     /// Call again.
     Pending,
@@ -202,12 +229,15 @@ impl FrameDecoder {
 
     /// Pop the next complete frame already buffered, without touching any
     /// socket. Returns `None` when the buffer holds less than a full frame.
-    pub fn pop(&mut self) -> Option<Vec<u8>> {
+    pub fn pop(&mut self) -> Option<Bytes> {
         self.take_frame()
     }
 
     /// Split off the next complete frame from the buffer, if fully present.
-    fn take_frame(&mut self) -> Option<Vec<u8>> {
+    /// `split_to(..).freeze()` hands out a view into the same underlying
+    /// allocation — no copy — leaving the remainder in `self.buf` for the
+    /// next frame.
+    fn take_frame(&mut self) -> Option<Bytes> {
         if self.buf.len() < 4 {
             return None;
         }
@@ -216,7 +246,7 @@ impl FrameDecoder {
             return None;
         }
         let _ = self.buf.split_to(4);
-        Some(self.buf.split_to(len).to_vec())
+        Some(self.buf.split_to(len).freeze())
     }
 }
 
@@ -224,39 +254,51 @@ impl FrameDecoder {
 mod tests {
     use super::*;
 
+    /// Test-only helper: strip the 4-byte length prefix a `frame`-returning
+    /// encoder produces, leaving the bare envelope `decode` expects.
+    fn envelope_of(frame: Bytes) -> Bytes {
+        frame.slice(4..)
+    }
+
     #[test]
     fn envelope_roundtrips() {
         let id = [7u8; 16];
         assert_eq!(
-            decode(&hello(&id)).unwrap(),
+            decode(&envelope_of(hello(&id))).unwrap(),
             Envelope::Hello {
                 version: PROTOCOL_VERSION,
                 identity: id
             }
         );
-        assert_eq!(decode(&heartbeat()).unwrap(), Envelope::Heartbeat);
         assert_eq!(
-            decode(&data(b"hi")).unwrap(),
+            decode(&envelope_of(heartbeat())).unwrap(),
+            Envelope::Heartbeat
+        );
+        assert_eq!(
+            decode(&envelope_of(data(b"hi"))).unwrap(),
             Envelope::Data {
                 payload: Bytes::from_static(b"hi")
             }
         );
         let m = [9u8; 16];
         assert_eq!(
-            decode(&data_req(&m, b"p")).unwrap(),
+            decode(&envelope_of(data_req(&m, b"p"))).unwrap(),
             Envelope::DataReq {
                 msg_id: m,
                 payload: Bytes::from_static(b"p")
             }
         );
-        assert_eq!(decode(&ack(&m)).unwrap(), Envelope::Ack { msg_id: m });
+        assert_eq!(
+            decode(&envelope_of(ack(&m))).unwrap(),
+            Envelope::Ack { msg_id: m }
+        );
     }
 
     #[test]
     fn payload_never_collides_with_control_frames() {
         let sneaky = b"\x02aiomsg-heartbeat";
         assert_eq!(
-            decode(&data(sneaky)).unwrap(),
+            decode(&envelope_of(data(sneaky))).unwrap(),
             Envelope::Data {
                 payload: Bytes::copy_from_slice(sneaky)
             }
@@ -265,8 +307,8 @@ mod tests {
 
     #[test]
     fn empty_and_unknown_are_none() {
-        assert_eq!(decode(b""), None);
-        assert_eq!(decode(b"\xffx"), None);
+        assert_eq!(decode(&Bytes::new()), None);
+        assert_eq!(decode(&Bytes::from_static(b"\xffx")), None);
     }
 
     #[test]
