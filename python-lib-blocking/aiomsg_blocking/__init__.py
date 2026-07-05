@@ -126,7 +126,9 @@ class Søcket:
             raise Exception("Unknown send mode.")
 
         # Started before any connections exist, same as the async package.
-        self._spawn(self._sender_main, name="aiomsg-sender")
+        # close() joins this thread before tearing down connections so that
+        # queued user sends reach the per-connection writer queues.
+        self._sender_thread = self._spawn(self._sender_main, name="aiomsg-sender")
 
     def idstr(self) -> str:
         return self.identity.hex()
@@ -286,12 +288,18 @@ class Søcket:
             # Unblocks the accept loop with an OSError.
             self.server.close()
 
+        # Stop the sender first: the FIFO sentinel guarantees every send()
+        # already queued is routed to a connection's writer queue before the
+        # connections themselves are flushed and closed below. (With no peer
+        # connected the sender exits at its poll instead; those messages are
+        # dropped, as at-most-once permits.)
+        self._user_send_queue.put(_SHUTDOWN)
+        self._sender_thread.join(max(0.1, deadline - time.monotonic()))
+
         with self._conn_lock:
             connections = list(self._connections.values())
         for c in connections:
             c.close(flush_timeout=max(0.0, deadline - time.monotonic()))
-
-        self._user_send_queue.put(_SHUTDOWN)
         for t in self._threads:
             t.join(max(0.1, deadline - time.monotonic()))
             if t.is_alive():

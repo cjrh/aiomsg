@@ -45,7 +45,12 @@ TLS_KEY = CERTS / "key.pem"
 
 COUNT = 10
 PREFIX = "m"
-SOURCE_LINGER = "2.0"
+# How long a source stays alive after its last send. Generous because a
+# cold-started peer on a loaded CI runner can take seconds to connect, and
+# at-most-once delivery drops anything sent while no peer is attached. A
+# passing run never waits this long: the harness terminates the source as
+# soon as the sink has printed its messages.
+SOURCE_LINGER = "10.0"
 
 # (source_lang, source_role, sink_lang, sink_role, send_mode, delivery)
 SCENARIOS = [
