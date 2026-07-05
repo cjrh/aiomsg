@@ -26,6 +26,26 @@ test-rust-sync:
 test-golang:
     cd golang-lib && just test
 
+# Run the C implementation's test suite.
+test-c:
+    cd c-lib && just test
+
+# Run the sync C++ implementation's test suite.
+test-cpp-sync:
+    cd cpp-lib-sync && just test
+
+# Run the async C++ implementation's test suite.
+test-cpp-async:
+    cd cpp-lib-async && just test
+
+# Run the Zig implementation's test suite.
+test-zig:
+    cd zig-lib && just test
+
+# Run the Java implementation's test suite.
+test-java:
+    cd java-lib && just test
+
 # Run the JavaScript (Node) implementation's test suite.
 test-javascript:
     cd javascript-lib && just test

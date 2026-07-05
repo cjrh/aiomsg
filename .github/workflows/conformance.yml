@@ -20,6 +20,9 @@ on:
       - 'cpp-lib-async/**'
       - 'zig-lib/**'
       - 'java-lib/**'
+      - 'javascript-lib/**'
+      - 'csharp-lib/**'
+      - 'lua-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
   pull_request:
@@ -36,6 +39,9 @@ on:
       - 'cpp-lib-async/**'
       - 'zig-lib/**'
       - 'java-lib/**'
+      - 'javascript-lib/**'
+      - 'csharp-lib/**'
+      - 'lua-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
 
@@ -47,9 +53,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # OpenSSL headers for the C / C++ / Zig agents (CMake + gcc/g++ and zig
-      # build are provided by the runner image and the actions below).
-      - name: Install OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      # build are provided by the runner image and the actions below), plus
+      # Lua and its two rocks (LuaSocket, LuaSec) for the Lua agent. The
+      # suite skips Lua pairings when the interpreter or rocks are missing,
+      # so without this they would silently not run. Node and .NET are
+      # already on the runner image.
+      - name: Install OpenSSL headers and Lua
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev lua5.4 liblua5.4-dev luarocks
+          sudo luarocks install luasocket
+          sudo luarocks install luasec
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v6
         with:

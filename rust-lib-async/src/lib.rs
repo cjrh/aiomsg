@@ -134,7 +134,7 @@ impl SocketBuilder {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
         let (recv_tx, recv_rx) = mpsc::unbounded_channel::<(Identity, Bytes)>();
 
-        let broker = Broker::new(self.send_mode, self.delivery, cmd_tx.clone(), recv_tx);
+        let broker = Broker::new(self.send_mode, self.delivery, recv_tx);
         let broker_handle = tokio::spawn(broker.run(cmd_rx));
 
         let (close_tx, close_rx) = watch::channel(false);

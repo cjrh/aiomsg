@@ -3,10 +3,11 @@
 --
 -- Pure data — no sockets — so it can be unit-tested in isolation. Lua strings
 -- are immutable byte arrays, which suits the wire format perfectly: frames are
--- [u32 big-endian length][envelope] and an envelope is [u8 type][body], all
--- built and parsed with string.pack / string.unpack (Lua 5.3+). The frame_*
--- helpers return a ready-to-write string; the Decoder reassembles frames from a
--- byte stream that may arrive in arbitrary chunks.
+-- [u32 big-endian length][envelope] and an envelope is [u8 type][body]. The
+-- length prefix is packed/unpacked with plain byte arithmetic rather than
+-- string.pack so the module runs on Lua 5.1 and LuaJIT as well as 5.3+. The
+-- frame_* helpers return a ready-to-write string; the Decoder reassembles
+-- frames from a byte stream that may arrive in arbitrary chunks.
 
 local M = {}
 
@@ -22,10 +23,25 @@ M.TYPE = {
   ACK = 0x05,
 }
 
+-- Big-endian u32 <-> 4-byte string, portable across Lua versions.
+local function encode_u32(n)
+  return string.char(
+    math.floor(n / 16777216) % 256,
+    math.floor(n / 65536) % 256,
+    math.floor(n / 256) % 256,
+    n % 256
+  )
+end
+
+local function decode_u32(bytes)
+  local b1, b2, b3, b4 = string.byte(bytes, 1, 4)
+  return ((b1 * 256 + b2) * 256 + b3) * 256 + b4
+end
+
 -- Build [u32 length][type][body] as a string.
 local function frame(msg_type, body)
   local envelope = string.char(msg_type) .. body
-  return string.pack(">I4", #envelope) .. envelope
+  return encode_u32(#envelope) .. envelope
 end
 
 function M.frame_hello(identity)
@@ -109,7 +125,7 @@ function Decoder:pop()
   if #self.buffer < 4 then
     return nil
   end
-  local length = string.unpack(">I4", self.buffer)
+  local length = decode_u32(self.buffer)
   if #self.buffer < 4 + length then
     return nil
   end

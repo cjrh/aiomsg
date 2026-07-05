@@ -99,3 +99,12 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# Local editor / tooling artifacts
+tags
+grafeo_memory.db/
+
+# Local scratch notes (not part of the published repo)
+TODO.txt
+thread-sync-research.md
+SUGGESTED_SYSTEM_IMPROVEMENTS.md

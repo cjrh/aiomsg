@@ -1,0 +1,38 @@
+name: C# CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'csharp-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/csharp.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'csharp-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/csharp.yml'
+
+defaults:
+  run:
+    working-directory: csharp-lib
+
+jobs:
+  test:
+    name: Build & test (dotnet test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The library targets .NET 9.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: extractions/setup-just@v4
+      # `just test` runs `dotnet test`: protocol unit tests + the in-process
+      # TCP/TLS integration test.
+      - name: Test
+        run: just test

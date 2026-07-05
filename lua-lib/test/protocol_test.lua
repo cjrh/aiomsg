@@ -20,9 +20,16 @@ local function envelope_of(frame)
   return string.sub(frame, 5)
 end
 
+-- Decode a big-endian u32 with byte arithmetic so the test runs on Lua 5.1
+-- and LuaJIT, which lack string.unpack.
+local function u32_of(frame)
+  local b1, b2, b3, b4 = string.byte(frame, 1, 4)
+  return ((b1 * 256 + b2) * 256 + b3) * 256 + b4
+end
+
 local data_frame = protocol.frame_data("hello")
 check("length prefix is big-endian envelope length",
-  string.unpack(">I4", data_frame) == #data_frame - 4)
+  u32_of(data_frame) == #data_frame - 4)
 check("envelope length is type byte + payload", #data_frame - 4 == 1 + 5)
 
 local id = string.rep("\7", 16)

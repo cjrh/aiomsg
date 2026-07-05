@@ -11,13 +11,21 @@
 //!
 //! - The fd is `try_clone()`d into independent read/write handles.
 //! - The `Connection` lives behind an `Arc<Mutex>` held **only for the
-//!   microsecond crypto steps**, never across a blocking socket read. The reader
-//!   blocks on its cloned fd with no lock, then briefly locks to `read_tls` +
-//!   `process_new_packets` + drain `reader()`. The writer blocks on the broker's
-//!   outbound channel with no lock, then briefly locks to frame +
-//!   `writer().write` + `write_tls`.
-//! - All `write_tls`/socket writes go through the write-socket mutex, so TLS
-//!   records never interleave on the wire.
+//!   microsecond crypto steps**, never across a blocking socket read *or write*.
+//!   The reader blocks on its cloned fd with no lock, then briefly locks to
+//!   `read_tls` + `process_new_packets` + drain `reader()`. The writer blocks on
+//!   the broker's outbound channel with no lock, then briefly locks to frame the
+//!   plaintext and *extract* the encrypted bytes into a local buffer.
+//! - Sending is "extract then write": ciphertext is pulled out of the
+//!   `Connection` under the lock, the connection lock is released, and only then
+//!   is the buffer written to the socket. That blocking write can stall under
+//!   flow control, but because it no longer pins the `Connection` mutex the
+//!   reader can always keep decrypting and draining the peer — which is what
+//!   breaks the backpressure deadlock that a lock-held socket write caused.
+//! - The write-socket mutex is the *outer* lock, held across the whole
+//!   extract-then-write, so ciphertext produced by the reader and the writer can
+//!   never reorder on the wire (TLS records carry an implicit sequence number
+//!   and must reach the peer in the order they were encrypted).
 //!
 //! Plain TCP needs none of that — it just uses the two `try_clone`d handles
 //! directly. The alternatives considered (a polling loop; a hand-rolled epoll
@@ -26,6 +34,10 @@
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read};
+// `Write` is only needed by the TLS send path (writing plaintext into the rustls
+// `Connection` and ciphertext to the socket).
+#[cfg(feature = "tls")]
+use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -392,6 +404,13 @@ where
         Err(_) => return,
     };
     let _ = read_sock.set_read_timeout(Some(HEARTBEAT_TIMEOUT));
+    // A third handle to the same fd, kept outside the mutexes purely so teardown
+    // can unblock a writer parked in a backpressured socket write without having
+    // to lock `write_sock` — which that very writer may be holding.
+    let shutdown_sock = match sock.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
     let conn = Arc::new(Mutex::new(conn));
     let write_sock = Arc::new(Mutex::new(sock));
 
@@ -410,11 +429,10 @@ where
     tls_reader(read_sock, &conn, &write_sock, decoder, cmd_tx, peer);
 
     let _ = cmd_tx.send(Command::ConnectionDown { identity: peer });
-    // Shut the socket so a writer parked in write_tls unblocks; dropping the
-    // broker's writer Sender also stops it via recv_timeout -> Disconnected.
-    if let Ok(w) = write_sock.lock() {
-        let _ = w.shutdown(Shutdown::Both);
-    }
+    // Shut the socket so a writer parked in a blocking socket write unblocks;
+    // dropping the broker's writer Sender also stops it via recv_timeout ->
+    // Disconnected.
+    let _ = shutdown_sock.shutdown(Shutdown::Both);
     let _ = writer.join();
 }
 
@@ -442,6 +460,9 @@ fn tls_reader<C, SD>(
     }
 
     let mut raw = [0u8; 16 * 1024];
+    // Plaintext scratch, reused across iterations so its capacity amortizes to
+    // a one-time allocation instead of one per socket read.
+    let mut sink = Vec::new();
     loop {
         // BLOCK here with no lock held.
         let n = match read_sock.read(&mut raw) {
@@ -449,42 +470,46 @@ fn tls_reader<C, SD>(
             Ok(n) => n,
             Err(_) => break, // read timeout (dead peer), shutdown, or io error
         };
+        sink.clear();
+        let needs_flush;
         {
             let mut c = conn.lock().unwrap();
+            // Feed this chunk of ciphertext into rustls, decrypting and draining
+            // plaintext as we go. `read_tls` reads from an in-memory slice, which
+            // never does real I/O, so any error it returns is a rustls
+            // backpressure signal ("message buffer full" / "received plaintext
+            // buffer full"), *not* a failure: the process-and-drain below frees
+            // those buffers and we retry with `off` unchanged. (Feeding the whole
+            // chunk before processing is what let those buffers overflow and,
+            // before this, killed the reader mid-stream.)
             let mut off = 0;
-            while off < n {
-                match c.read_tls(&mut &raw[off..n]) {
-                    Ok(0) => {
-                        // rustls' inbound buffer is full; process to drain it,
-                        // then continue feeding the rest.
-                        if c.process_new_packets().is_err() {
-                            return;
-                        }
-                        let mut sink = Vec::new();
-                        drain_reader(&mut *c, &mut sink);
-                        decoder.extend_from(&sink);
+            loop {
+                let fed_all = match c.read_tls(&mut &raw[off..n]) {
+                    Ok(0) => true, // close_notify received, or slice consumed
+                    Ok(k) => {
+                        off += k;
+                        off >= n
                     }
-                    Ok(k) => off += k,
-                    Err(_) => return,
+                    Err(_) => false, // buffers full; drained below, then retry
+                };
+                if c.process_new_packets().is_err() {
+                    return; // fatal TLS error (bad decrypt / protocol violation)
+                }
+                drain_reader(&mut *c, &mut sink);
+                if fed_all {
+                    break;
                 }
             }
-            if c.process_new_packets().is_err() {
-                break;
-            }
-            // Processing may have queued control data (alerts, KeyUpdate
-            // responses, close_notify) that must go out now.
-            if c.wants_write() {
-                if let Ok(mut w) = write_sock.lock() {
-                    while c.wants_write() {
-                        if c.write_tls(&mut *w).is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-            let mut sink = Vec::new();
-            drain_reader(&mut *c, &mut sink);
             decoder.extend_from(&sink);
+            // Processing may have queued control data (alerts, KeyUpdate
+            // responses, close_notify). Note it, but flush it *after* releasing
+            // the connection lock: the flush ends in a blocking socket write,
+            // and holding this mutex across that write is exactly what deadlocked
+            // the reader against the writer under backpressure.
+            needs_flush = c.wants_write();
+        }
+        if needs_flush {
+            let _ = write_pending(conn, write_sock, None);
         }
         if !forward_frames(&mut decoder, cmd_tx, peer) {
             break;
@@ -511,7 +536,9 @@ where
     }
 }
 
-/// Lock, drain plaintext, and flush any pending control bytes.
+/// Drain any plaintext buffered during the handshake into `decoder`, then flush
+/// any control bytes the handshake left pending — the flush released from the
+/// connection lock, as everywhere else.
 #[cfg(feature = "tls")]
 fn drain_plaintext<C, SD>(
     conn: &Mutex<C>,
@@ -521,24 +548,22 @@ fn drain_plaintext<C, SD>(
     C: std::ops::DerefMut<Target = rustls::ConnectionCommon<SD>>,
     SD: rustls::SideData,
 {
-    let mut c = conn.lock().unwrap();
-    if c.wants_write() {
-        if let Ok(mut w) = write_sock.lock() {
-            while c.wants_write() {
-                if c.write_tls(&mut *w).is_err() {
-                    break;
-                }
-            }
-        }
+    let needs_flush;
+    {
+        let mut c = conn.lock().unwrap();
+        let mut sink = Vec::new();
+        drain_reader(&mut *c, &mut sink);
+        decoder.extend_from(&sink);
+        needs_flush = c.wants_write();
     }
-    let mut sink = Vec::new();
-    drain_reader(&mut *c, &mut sink);
-    decoder.extend_from(&sink);
+    if needs_flush {
+        let _ = write_pending(conn, write_sock, None);
+    }
 }
 
-/// The TLS writer: block on the broker's outbound channel (no lock), then
-/// briefly lock to encrypt one frame and flush its ciphertext. Heartbeats are
-/// emitted when the channel is idle for an interval.
+/// The TLS writer: block on the broker's outbound channel (no lock), then send
+/// each frame via the extract-then-write path. Heartbeats are emitted when the
+/// channel is idle for an interval.
 #[cfg(feature = "tls")]
 fn tls_writer<C, SD>(
     conn: Arc<Mutex<C>>,
@@ -554,33 +579,74 @@ fn tls_writer<C, SD>(
             Err(RecvTimeoutError::Timeout) => protocol::heartbeat(),
             Err(RecvTimeoutError::Disconnected) => break,
         };
-        if tls_send(&conn, &write_sock, &frame).is_err() {
+        if write_pending(&conn, &write_sock, Some(frame.as_ref())).is_err() {
             break;
         }
     }
 }
 
-/// Encrypt one plaintext frame and flush its ciphertext to the socket. The
-/// connection lock and the write-socket lock are always taken in this order
-/// (matching the reader) so the two threads can't deadlock, and so all
-/// `write_tls` calls are serialized — TLS records never interleave on the wire.
+/// Extract-then-write: optionally encrypt one plaintext `frame`, pull all
+/// pending ciphertext out of the `Connection` into a local buffer under the
+/// connection lock, release that lock, then write the buffer to the socket.
+///
+/// `write_sock` is the outer lock and is held across the whole call; `conn` is
+/// the inner lock and is released *before* the blocking socket write. Two things
+/// follow from that ordering:
+///
+/// - The connection mutex is never held across a socket write, so a
+///   backpressured write can't wedge the reader (which needs that mutex to
+///   decrypt) against the writer.
+/// - Because `write_sock` serializes the extract *and* the write, ciphertext
+///   drained by different threads reaches the peer in encryption order — TLS
+///   records never reorder on the wire.
 #[cfg(feature = "tls")]
-fn tls_send<C, SD>(
+fn write_pending<C, SD>(
     conn: &Mutex<C>,
     write_sock: &Mutex<TcpStream>,
-    frame: &[u8],
+    frame: Option<&[u8]>,
 ) -> std::io::Result<()>
 where
     C: std::ops::DerefMut<Target = rustls::ConnectionCommon<SD>>,
     SD: rustls::SideData,
 {
-    let mut c = conn.lock().unwrap();
-    // Frame into the TLS plaintext stream (length prefix + envelope), exactly as
-    // the plain path does — the writer carries bare envelopes, not framed bytes.
-    protocol::write_frame(&mut c.writer(), frame)?;
-    let mut w = write_sock.lock().unwrap();
-    while c.wants_write() {
-        c.write_tls(&mut *w)?;
+    // Ciphertext scratch, reused per thread so steady-state sends don't
+    // allocate. (Two threads share a connection — the writer and the reader's
+    // control-flush path — so the buffer can't live in either one's loop.)
+    thread_local! {
+        static CIPHER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
     }
-    Ok(())
+
+    let mut w = write_sock.lock().unwrap();
+    CIPHER.with(|cell| {
+        let cipher = &mut *cell.borrow_mut();
+        cipher.clear();
+        {
+            let mut c = conn.lock().unwrap();
+            if let Some(frame) = frame {
+                // Feed the (already length-prefixed) plaintext frame in whatever
+                // chunks rustls will accept, draining the encrypted output into
+                // `cipher` between chunks. rustls bounds its outbound buffer at
+                // DEFAULT_BUFFER_LIMIT (64 KiB); a single `write_all` of a frame that
+                // size or larger would fill it and fail with WriteZero, so we must
+                // drain to make room as we go. Draining into an in-memory Vec never
+                // blocks, so the connection lock covers only the encryption.
+                let mut off = 0;
+                while off < frame.len() {
+                    off += c.writer().write(&frame[off..])?;
+                    while c.wants_write() {
+                        c.write_tls(&mut *cipher)?;
+                    }
+                }
+            }
+            // Flush anything still queued — the tail of `frame`, plus any control
+            // records (alerts, KeyUpdate responses, close_notify) rustls produced.
+            while c.wants_write() {
+                c.write_tls(&mut *cipher)?;
+            }
+        }
+        if !cipher.is_empty() {
+            w.write_all(cipher)?;
+        }
+        Ok(())
+    })
 }

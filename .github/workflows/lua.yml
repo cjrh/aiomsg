@@ -1,0 +1,41 @@
+name: Lua CI
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'lua-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/lua.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'lua-lib/**'
+      - 'conformance/certs/**'
+      - '.github/workflows/lua.yml'
+
+defaults:
+  run:
+    working-directory: lua-lib
+
+jobs:
+  test:
+    name: Test (lua)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # Pure Lua on LuaSocket + LuaSec; the only setup is the interpreter,
+      # the two rocks, and the OpenSSL headers LuaSec builds against.
+      - name: Install Lua, LuaSocket, LuaSec
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev lua5.4 liblua5.4-dev luarocks
+          sudo luarocks install luasocket
+          sudo luarocks install luasec
+      - uses: extractions/setup-just@v4
+      # `just test` runs the protocol unit tests + the TCP/TLS integration test.
+      - name: Test
+        run: just test
