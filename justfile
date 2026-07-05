@@ -10,6 +10,10 @@ default:
 test-python:
     cd python-lib && just test
 
+# Run the blocking Python implementation's test suite.
+test-python-blocking:
+    cd python-lib-blocking && just test
+
 # Run the async Rust implementation's test suite.
 test-rust-async:
     cd rust-lib-async && just test
@@ -103,6 +107,7 @@ agents:
         fi
     done <<'EOF'
     python|conformance/agents/python_agent.py
+    python-blocking|conformance/agents/python_blocking_agent.py
     rust|rust-lib-async/target/debug/examples/conformance_agent
     rust-sync|rust-lib-sync/target/debug/examples/conformance_agent
     go|golang-lib/build/conformance_agent
@@ -122,7 +127,7 @@ test-all:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
-    for d in python-lib rust-lib-async rust-lib-sync golang-lib c-lib cpp-lib-sync cpp-lib-async zig-lib java-lib javascript-lib csharp-lib lua-lib; do
+    for d in python-lib python-lib-blocking rust-lib-async rust-lib-sync golang-lib c-lib cpp-lib-sync cpp-lib-async zig-lib java-lib javascript-lib csharp-lib lua-lib; do
         if [[ -f "$d/justfile" ]]; then
             echo "=== $d ==="
             (cd "$d" && just test) || rc=1

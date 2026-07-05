@@ -1,0 +1,58 @@
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "aiomsg-blocking"
+version = "2019.12.3"
+description = "Blocking (threaded) socket-based abstraction for messaging patterns"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Caleb Hattingh", email = "caleb.hattingh@gmail.com" },
+]
+keywords = ["threading", "socket", "network", "messaging", "blocking"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/cjrh/aiomsg"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "aiomsg_blocking"
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-cov",
+    "coverage",
+    "portpicker",
+]
+lint = [
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = [
+    "E501",  # line too long
+    "F541",  # f-string without placeholders
+    "E741",  # ambiguous variable name (e.g. `l`)
+]
