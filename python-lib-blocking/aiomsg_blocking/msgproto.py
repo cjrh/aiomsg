@@ -11,9 +11,10 @@ recv/send, but a single OpenSSL connection does not, so every socket
 operation here is serialised through a per-connection lock. To keep the lock
 from being held across an indefinite block, the socket must be configured
 with a short timeout (``POLL_INTERVAL``); each recv/send attempt holds the
-lock for at most that long, then yields to the other thread. This is the same
-poll-based design (and the same ~50 ms worst-case latency) as the repo's
-other synchronous ports.
+lock for at most that long. The reader additionally waits for readability
+*without* the lock (see ``_readable``) so an idle reader never starves the
+writer of socket access. This is the same poll-based design (and the same
+~50 ms worst-case latency) as the repo's other synchronous ports.
 
 Copy behaviour: receives land via ``recv_into`` directly into an
 exactly-sized buffer (no intermediate stream buffer); plain-TCP sends use
@@ -22,6 +23,7 @@ the payload. TLS sends concatenate once (``SSLSocket`` has no ``sendmsg``).
 """
 
 import logging
+import select
 import ssl
 import time
 from typing import Callable
@@ -61,6 +63,29 @@ def read_msg(sock, lock, abort: Callable[[], bool], idle_timeout: float) -> byte
     return data
 
 
+def _readable(sock) -> bool:
+    """Wait up to POLL_INTERVAL for the socket to have bytes to read.
+
+    Called WITHOUT the connection lock. This matters: if the reader instead
+    polled by calling recv with the lock held (as it once did), it would hold
+    the lock for ~100% of every poll cycle on an idle connection, and Python
+    locks are not fair — on a loaded machine the writer thread can then starve
+    for many seconds, delaying heartbeats/ACKs/data until the peer times the
+    connection out. Waiting for readability lock-free keeps the lock available
+    to the writer except for the brief moments data is actually being read.
+    """
+    try:
+        if isinstance(sock, ssl.SSLSocket) and sock.pending():
+            # Bytes already decrypted inside the SSL layer won't show up in
+            # select() on the underlying fd.
+            return True
+        r, _, _ = select.select([sock], [], [], POLL_INTERVAL)
+        return bool(r)
+    except (OSError, ValueError):
+        # Socket closed under us; let the recv attempt surface the error.
+        return True
+
+
 def _read_exactly(sock, nbytes, lock, abort, idle_timeout):
     """Receive exactly ``nbytes`` into a fresh buffer, or None on EOF/abort/idle."""
     buf = bytearray(nbytes)
@@ -70,6 +95,8 @@ def _read_exactly(sock, nbytes, lock, abort, idle_timeout):
     while got < nbytes:
         if abort() or time.monotonic() > deadline:
             return None
+        if not _readable(sock):
+            continue
         try:
             with lock:
                 n = sock.recv_into(view[got:])
