@@ -155,7 +155,15 @@ def test_reconnect_after_binder_restart():
             server1.bind("127.0.0.1", port)
             client.send(b"one")
             assert server1.recv(timeout=RECV_TIMEOUT) == b"one"
-        # server1 is gone; the client must reconnect to a fresh binder.
+        # server1 is gone; the client must reconnect to a fresh binder. Wait
+        # until the client has *noticed* the disconnect before sending again:
+        # a send made in the window between server1 closing and the client
+        # seeing EOF is routed onto the dead connection and (per at-most-once
+        # semantics) lost.
+        deadline = time.monotonic() + RECV_TIMEOUT
+        while client._connections and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not client._connections
         with Søcket() as server2:
             server2.bind("127.0.0.1", port)
             client.send(b"two")
