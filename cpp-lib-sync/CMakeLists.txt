@@ -22,7 +22,7 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 # --- the library ----------------------------------------------------------
-add_library(aiomsg STATIC src/protocol.cpp src/socket.cpp)
+add_library(aiomsg STATIC src/protocol.cpp src/socket.cpp src/ws.cpp)
 add_library(aiomsg::aiomsg ALIAS aiomsg)
 target_include_directories(aiomsg PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -50,6 +50,11 @@ if(AIOMSG_BUILD_TESTS)
     target_link_libraries(test_protocol PRIVATE aiomsg)
     target_include_directories(test_protocol PRIVATE src)
     add_test(NAME test_protocol COMMAND test_protocol)
+
+    add_executable(test_ws tests/test_ws.cpp)
+    target_link_libraries(test_ws PRIVATE aiomsg OpenSSL::SSL OpenSSL::Crypto)
+    target_include_directories(test_ws PRIVATE src)
+    add_test(NAME test_ws COMMAND test_ws)
 
     add_executable(test_integration tests/test_integration.cpp)
     target_link_libraries(test_integration PRIVATE aiomsg)

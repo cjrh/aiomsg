@@ -44,6 +44,7 @@ from typing import (
 
 from . import envelope
 from . import msgproto
+from . import ws
 
 __all__ = ["Søcket", "Socket", "SendMode", "DeliveryGuarantee"]
 
@@ -344,7 +345,14 @@ class Søcket:
             if ssl_context:
                 conn.settimeout(_HANDSHAKE_TIMEOUT)
                 conn = ssl_context.wrap_socket(conn, server_side=True)
-            self._connection(conn)
+            # Bind-side sniff: raw aiomsg vs WebSocket upgrade on one port
+            # (PROTOCOL.md §10). The connect side never receives WebSocket, so
+            # _connect_with_retry calls _connection directly. On TLS the sniff
+            # sees decrypted bytes, so wss and raw-TLS share the port.
+            wrapped = ws.sniff_and_wrap(conn)
+            if wrapped is None:
+                return
+            self._connection(wrapped)
         except OSError as e:
             logger.info(f"Connection setup failed: {e}")
         finally:

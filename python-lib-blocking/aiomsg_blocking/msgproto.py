@@ -75,9 +75,12 @@ def _readable(sock) -> bool:
     to the writer except for the brief moments data is actually being read.
     """
     try:
-        if isinstance(sock, ssl.SSLSocket) and sock.pending():
-            # Bytes already decrypted inside the SSL layer won't show up in
-            # select() on the underlying fd.
+        # Bytes buffered above the fd — decrypted inside the SSL layer, or
+        # decoded inside the WebSocket adapter (aiomsg_blocking.ws) — won't show
+        # up in select() on the underlying fd. Any socket-like object may expose
+        # a pending() readiness hook (SSLSocket does; the WS wrappers do too).
+        pending = getattr(sock, "pending", None)
+        if pending is not None and pending():
             return True
         r, _, _ = select.select([sock], [], [], POLL_INTERVAL)
         return bool(r)

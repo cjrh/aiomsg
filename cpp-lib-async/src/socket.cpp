@@ -18,6 +18,7 @@
 // Resends (at-least-once) are swept by a periodic timer coroutine.
 #include "aiomsg/socket.hpp"
 #include "protocol.hpp"
+#include "ws.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -136,6 +137,97 @@ struct TlsTransport : Transport {
     void close() override {
         std::error_code ec;
         stream.lowest_layer().close(ec);
+    }
+};
+
+// A WebSocket byte-stream adapter over an inner (plain or TLS) transport, used
+// on the bind side when the accept-time sniff detects an HTTP upgrade
+// (PROTOCOL.md §10). It presents the same Transport surface as the layer below:
+// read_some yields the concatenation of inbound binary-message payloads (the
+// aiomsg byte stream of §2), and write_all sends each aiomsg frame as one
+// unmasked binary WebSocket frame. Control frames are handled inline
+// (ping->pong, pong ignored, close/text/protocol-error -> tear down). WS message
+// boundaries carry no meaning, so fragmentation and split frames are transparent.
+struct WsTransport : Transport {
+    std::shared_ptr<Transport> inner;
+    ws::FrameParser parser;
+    std::vector<uint8_t> decoded;  // unmasked payload not yet handed to read_some
+    size_t decoded_pos = 0;
+    bool close_sent = false;
+
+    WsTransport(std::shared_ptr<Transport> in, const uint8_t* seed, size_t seed_len)
+        : inner(std::move(in)) {
+        if (seed_len) {
+            parser.feed(seed, seed_len);
+        }
+    }
+
+    awaitable<std::size_t> read_some(asio::mutable_buffer b) override {
+        while (decoded_pos == decoded.size()) {
+            decoded.clear();
+            decoded_pos = 0;
+            co_await fill();  // may throw on peer close / protocol error / EOF
+        }
+        std::size_t n = std::min(b.size(), decoded.size() - decoded_pos);
+        std::memcpy(b.data(), decoded.data() + decoded_pos, n);
+        decoded_pos += n;
+        co_return n;
+    }
+
+    // Read and dispose of WebSocket frames until at least one data payload is
+    // buffered in `decoded`. Ping is answered with a pong; a close or protocol
+    // error is echoed and then reported by throwing (the reader treats it as EOF).
+    awaitable<void> fill() {
+        for (;;) {
+            auto r = parser.next();
+            if (r.event == ws::Event::Binary) {
+                if (!r.payload.empty()) {
+                    decoded.insert(decoded.end(), r.payload.begin(), r.payload.end());
+                    co_return;
+                }
+                continue;
+            }
+            if (r.event == ws::Event::Ping) {
+                auto pong = ws::server_frame(ws::kOpPong, r.payload.data(), r.payload.size());
+                co_await inner->write_all(asio::buffer(pong));
+                continue;
+            }
+            if (r.event == ws::Event::Pong) {
+                continue;
+            }
+            if (r.event == ws::Event::Close || r.event == ws::Event::ProtocolError) {
+                co_await send_close(r.code);
+                throw std::runtime_error("websocket closed");
+            }
+            // Event::Need — read more raw bytes from the inner transport.
+            uint8_t buf[16384];
+            std::size_t got = co_await inner->read_some(asio::buffer(buf));
+            parser.feed(buf, got);
+        }
+    }
+
+    awaitable<void> write_all(asio::const_buffer b) override {
+        auto frame = ws::server_frame(ws::kOpBin, static_cast<const uint8_t*>(b.data()),
+                                      b.size());
+        co_await inner->write_all(asio::buffer(frame));
+    }
+
+    awaitable<void> do_handshake() override { co_return; }  // upgrade already done
+
+    void close() override { inner->close(); }
+
+    awaitable<void> send_close(uint16_t code) {
+        if (close_sent) {
+            co_return;
+        }
+        close_sent = true;
+        uint8_t payload[2] = {static_cast<uint8_t>(code >> 8), static_cast<uint8_t>(code & 0xff)};
+        auto frame = ws::server_frame(ws::kOpClose, payload, 2);
+        try {
+            co_await inner->write_all(asio::buffer(frame));
+        } catch (const std::exception&) {
+            // peer already gone — teardown proceeds regardless
+        }
     }
 };
 
@@ -370,6 +462,7 @@ struct Socket::Impl : std::enable_shared_from_this<Impl> {
 
     // --- coroutines -------------------------------------------------------
     awaitable<void> sweep_loop();
+    awaitable<bool> ws_upgrade(const ConnPtr& c);
     awaitable<bool> read_hello(const ConnPtr& c, proto::Decoder& dec);
     awaitable<void> reader(ConnPtr c, proto::Decoder dec);
     awaitable<void> writer(ConnPtr c);
@@ -396,6 +489,50 @@ awaitable<void> Socket::Impl::sweep_loop() {
         }
         sweep();
     }
+}
+
+// Complete the RFC 6455 upgrade on a connection whose first byte ('G') has
+// already been consumed. Reads the rest of the HTTP request, validates it, sends
+// the 101 (or an error) response, and on success replaces the connection's
+// transport with a WebSocket adapter seeded with any bytes read past the request
+// (the first WS frames). Returns false if the connection should be dropped.
+awaitable<bool> Socket::Impl::ws_upgrade(const ConnPtr& c) {
+    std::string request = "G";  // the sniffed first byte
+    uint8_t buf[4096];
+    while (request.find("\r\n\r\n") == std::string::npos) {
+        if (request.size() > ws::kMaxRequestBytes) {
+            auto resp = ws::error_response("400 Bad Request");
+            try {
+                co_await c->transport->write_all(asio::buffer(resp));
+            } catch (const std::exception&) {
+            }
+            co_return false;
+        }
+        std::size_t got = co_await c->transport->read_some(asio::buffer(buf));
+        if (got == 0) {
+            co_return false;
+        }
+        request.append(reinterpret_cast<char*>(buf), got);
+    }
+
+    size_t term = request.find("\r\n\r\n");
+    auto result = ws::parse_upgrade(std::string_view(request.data(), term + 4));
+    if (!result.ok) {
+        auto resp = ws::error_response(result.status);
+        try {
+            co_await c->transport->write_all(asio::buffer(resp));
+        } catch (const std::exception&) {
+        }
+        co_return false;
+    }
+
+    auto resp = ws::success_response(result.key);
+    co_await c->transport->write_all(asio::buffer(resp));
+
+    std::string leftover = request.substr(term + 4);
+    c->transport = std::make_shared<WsTransport>(
+        c->transport, reinterpret_cast<const uint8_t*>(leftover.data()), leftover.size());
+    co_return true;
 }
 
 awaitable<bool> Socket::Impl::read_hello(const ConnPtr& c, proto::Decoder& dec) {
@@ -483,6 +620,28 @@ awaitable<void> Socket::Impl::run_connection(tcp::socket sock,
     proto::Decoder dec;
     try {
         co_await c->transport->do_handshake();
+        if (server) {
+            // Single-port sniff (PROTOCOL.md §10): peek the first byte after TLS
+            // termination. 0x00 -> raw aiomsg (replay the byte to the decoder);
+            // 'G' -> HTTP upgrade then wrap the transport in WebSocket; else drop.
+            uint8_t first = 0;
+            std::size_t got = co_await c->transport->read_some(asio::buffer(&first, 1));
+            if (got == 0) {
+                c->transport->close();
+                co_return;
+            }
+            if (first == 0x00) {
+                dec.push(&first, 1);
+            } else if (first == 'G') {
+                if (!co_await ws_upgrade(c)) {
+                    c->transport->close();
+                    co_return;
+                }
+            } else {
+                c->transport->close();
+                co_return;
+            }
+        }
         auto hello = proto::frame_hello(id);
         co_await c->transport->write_all(asio::buffer(hello));
         if (!co_await read_hello(c, dec)) {

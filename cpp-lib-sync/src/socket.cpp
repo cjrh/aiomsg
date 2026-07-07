@@ -22,6 +22,7 @@
 // nearest pending deadline — no per-message timer threads.
 #include "aiomsg/socket.hpp"
 #include "protocol.hpp"
+#include "ws.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -89,6 +90,10 @@ void set_read_timeout(int fd, milliseconds ms) {
 struct Conn {
     int fd = -1;
     SSL* ssl = nullptr;  // null for plain TCP
+    // Non-null once this accepted connection was upgraded to WebSocket
+    // (PROTOCOL.md §10). Reads/writes then flow through the WS frame layer,
+    // over the same fd/SSL transport underneath.
+    std::unique_ptr<ws::State> ws;
     proto::Identity peer{};
 
     std::mutex out_mtx;
@@ -477,14 +482,12 @@ done:
 
 namespace {
 
-// Read once into the decoder. Returns >0 bytes read, 0 on timeout/no-data,
-// -1 on close or fatal error.
-int conn_read(Conn& c, proto::Decoder& dec) {
-    uint8_t buf[16384];
+// Read up to `cap` raw transport bytes (fd or SSL). Returns >0 bytes read,
+// 0 on timeout/no-data, -1 on close or fatal error.
+int raw_read_some(Conn& c, uint8_t* buf, size_t cap) {
     if (c.ssl) {
-        int r = SSL_read(c.ssl, buf, sizeof(buf));
+        int r = SSL_read(c.ssl, buf, static_cast<int>(cap));
         if (r > 0) {
-            dec.push(buf, static_cast<size_t>(r));
             return r;
         }
         int err = SSL_get_error(c.ssl, r);
@@ -496,9 +499,8 @@ int conn_read(Conn& c, proto::Decoder& dec) {
         }
         return -1;
     }
-    ssize_t n = ::recv(c.fd, buf, sizeof(buf), 0);
+    ssize_t n = ::recv(c.fd, buf, cap, 0);
     if (n > 0) {
-        dec.push(buf, static_cast<size_t>(n));
         return static_cast<int>(n);
     }
     if (n == 0) {
@@ -510,7 +512,8 @@ int conn_read(Conn& c, proto::Decoder& dec) {
     return -1;
 }
 
-int conn_write_all(Conn& c, const uint8_t* buf, size_t len) {
+// Write all `len` raw transport bytes. Returns 0 on success, -1 on error.
+int raw_write_all(Conn& c, const uint8_t* buf, size_t len) {
     size_t off = 0;
     while (off < len) {
         if (c.ssl) {
@@ -536,6 +539,41 @@ int conn_write_all(Conn& c, const uint8_t* buf, size_t len) {
         return -1;
     }
     return 0;
+}
+
+// The WebSocket adapter (ws.cpp) moves raw bytes through these callbacks, so the
+// same frame layer serves plain and TLS transports unchanged.
+ws::RawRead ws_reader(Conn& c) {
+    return [&c](uint8_t* b, size_t n) { return raw_read_some(c, b, n); };
+}
+ws::RawWrite ws_writer(Conn& c) {
+    return [&c](const uint8_t* b, size_t n) { return raw_write_all(c, b, n); };
+}
+
+// Read once into the decoder. Returns >0 bytes read, 0 on timeout/no-data,
+// -1 on close or fatal error. Routes through the WS layer once upgraded (§10).
+int conn_read(Conn& c, proto::Decoder& dec) {
+    if (c.ws) {
+        std::vector<uint8_t> out;
+        int r = ws::read(*c.ws, ws_reader(c), ws_writer(c), out);
+        if (r > 0 && !out.empty()) {
+            dec.push(out.data(), out.size());
+        }
+        return r;
+    }
+    uint8_t buf[16384];
+    int r = raw_read_some(c, buf, sizeof(buf));
+    if (r > 0) {
+        dec.push(buf, static_cast<size_t>(r));
+    }
+    return r;
+}
+
+int conn_write_all(Conn& c, const uint8_t* buf, size_t len) {
+    if (c.ws) {
+        return ws::write(*c.ws, ws_writer(c), buf, len);
+    }
+    return raw_write_all(c, buf, len);
 }
 
 // Block (within the handshake timeout) for the peer's HELLO. Returns true on
@@ -615,6 +653,27 @@ void Socket::Impl::run_connection(int fd, SSL_CTX* ctx, bool is_server,
                 teardown();
                 return;
             }
+        }
+    }
+
+    // Single-port sniff (bind side only): decide raw aiomsg vs WebSocket from
+    // the first byte and, for HTTP, perform the upgrade (PROTOCOL.md §10). The
+    // connect side never receives WebSocket. Runs on decrypted bytes, so a TLS
+    // bind serves raw-TLS peers and wss:// browsers on one port.
+    if (is_server) {
+        auto st = std::make_unique<ws::State>();
+        std::vector<uint8_t> prefix;
+        ws::Sniff sniff =
+            ws::sniff_and_upgrade(ws_reader(*c), ws_writer(*c), *st, prefix, kHandshake);
+        if (sniff == ws::Sniff::Reject) {
+            teardown();
+            return;
+        }
+        if (sniff == ws::Sniff::WebSocket) {
+            c->ws = std::move(st);
+        } else if (!prefix.empty()) {
+            // Raw aiomsg: replay the sniffed bytes into the decoder.
+            dec.push(prefix.data(), prefix.size());
         }
     }
 

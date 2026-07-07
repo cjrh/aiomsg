@@ -207,3 +207,50 @@ An implementation conforms to aiomsg protocol v1 if it:
    connect end) auto-reconnects (§7).
 8. Replies with `ACK` to every `DATA_REQ`, and implements sender-side resend for
    AT_LEAST_ONCE (§6), rejecting the AT_LEAST_ONCE + PUBLISH combination.
+
+---
+
+## 10. WebSocket sub-transport
+
+WebSocket (RFC 6455) is an **optional sub-transport** that lets browser clients
+participate as ordinary aiomsg peers. It is a pure byte-stream adapter layered
+below §2: everything above the framing layer (§3–§7) is transport-independent
+and unchanged.
+
+1. **Byte-stream carriage.** aiomsg frames — the complete `LENGTH || ENVELOPE`
+   bytes of §2, including the `HELLO` handshake — travel as the payload bytes of
+   **binary** WebSocket messages. The concatenation of all binary-message
+   payloads, in order, forms the byte stream that §2's frame decoder consumes.
+   WebSocket message boundaries are **meaningless**: a peer MAY pack several
+   aiomsg frames into one WS message or split one frame across several, and a
+   conformant decoder MUST NOT depend on where the boundaries fall.
+
+2. **Single-port auto-detection.** A **bind** end MAY accept WebSocket
+   connections on the same port as raw TCP by peeking the first byte of each
+   accepted connection (after TLS termination, if any):
+   - `0x00` → raw aiomsg (the first frame is always `HELLO`, an 18-byte
+     envelope, so its length prefix begins `0x00 0x00 0x00 0x12`);
+   - `0x47` (`'G'`, the start of `GET … HTTP/1.1`) → perform the WebSocket
+     upgrade, then feed the post-upgrade binary payloads to the same decoder;
+   - anything else → close the connection.
+
+   The `connect` end never speaks WebSocket in the language libraries; the only
+   WS connect-end shipped is the browser package.
+
+3. **`wss` / TLS.** Because the sniff happens on decrypted bytes, a TLS bind
+   socket serves raw-TLS aiomsg peers and `wss://` browsers on one port with no
+   extra configuration. Browsers on `https` pages require `wss`.
+
+4. **Subprotocols and extensions are never negotiated** — in particular there is
+   no `permessage-deflate`. **Text** frames (opcode `0x1`) are a protocol error
+   (close 1003). All client→server frames MUST be masked (close 1002 otherwise).
+   WebSocket `ping` is answered with `pong`, and `pong` is ignored, but neither
+   carries any aiomsg meaning.
+
+5. **Liveness** is governed only by aiomsg `HEARTBEAT` frames (§5) on every
+   transport, identically. Browsers cannot emit WS pings from JavaScript, so
+   aiomsg heartbeats — not WS ping/pong — judge a WS connection alive or dead.
+
+6. **Authentication** (Origin, Cookie, subprotocol tokens, …) is out of scope:
+   the upgrade handler ignores all of it. Trust is TLS only; application-layer
+   auth is built on the delivered payloads (e.g. a JWT as the first message).

@@ -23,6 +23,7 @@
 mod broker;
 mod conn;
 pub mod protocol;
+mod ws;
 
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};

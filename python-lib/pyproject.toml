@@ -45,6 +45,8 @@ test = [
     "coverage",
     "portpicker",
     "pytest-benchmark",
+    # Trusted RFC 6455 client for the WebSocket conformance agent (§5).
+    "websockets",
 ]
 lint = [
     "ruff",

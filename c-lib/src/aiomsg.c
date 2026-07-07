@@ -19,6 +19,7 @@
  */
 #include "aiomsg.h"
 #include "protocol.h"
+#include "ws.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -127,6 +128,7 @@ typedef struct pending {
 typedef struct conn {
     int fd;
     SSL *ssl; /* NULL for plain TCP */
+    aiomsg_ws *ws; /* non-NULL once a WebSocket upgrade has completed (§10) */
     uint8_t peer[AIOMSG_IDENTITY_SIZE];
 
     pthread_mutex_t out_mtx;
@@ -657,14 +659,13 @@ static void set_read_timeout(int fd, long ms) {
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 
-/* Read once. Returns >0 if bytes were pushed to the decoder, 0 on timeout/no
- * data, -1 on close or error. */
-static int conn_read(conn *c, aiomsg_decoder *dec) {
-    uint8_t buf[16384];
+/* Read once from the transport (TLS or plain TCP) into buf. Returns >0 bytes
+ * read, 0 on timeout/no data, -1 on close or error. */
+static int raw_read(conn *c, uint8_t *buf, size_t cap) {
     if (c->ssl) {
-        int r = SSL_read(c->ssl, buf, sizeof(buf));
+        int r = SSL_read(c->ssl, buf, (int)cap);
         if (r > 0) {
-            return aiomsg_decoder_push(dec, buf, (size_t)r) == 0 ? r : -1;
+            return r;
         }
         int err = SSL_get_error(c->ssl, r);
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
@@ -675,9 +676,9 @@ static int conn_read(conn *c, aiomsg_decoder *dec) {
         }
         return -1; /* SSL_ERROR_ZERO_RETURN (clean close) or fatal */
     }
-    ssize_t n = recv(c->fd, buf, sizeof(buf), 0);
+    ssize_t n = recv(c->fd, buf, cap, 0);
     if (n > 0) {
-        return aiomsg_decoder_push(dec, buf, (size_t)n) == 0 ? (int)n : -1;
+        return (int)n;
     }
     if (n == 0) {
         return -1;
@@ -688,7 +689,54 @@ static int conn_read(conn *c, aiomsg_decoder *dec) {
     return -1;
 }
 
+static int raw_write(conn *c, const uint8_t *buf, size_t len);
+
+/* Flush any pending WebSocket control-frame bytes (pong / close) to the peer. */
+static int ws_flush_out(conn *c) {
+    if (c->ws->out_len == 0) {
+        return 0;
+    }
+    int rc = raw_write(c, c->ws->out, c->ws->out_len);
+    c->ws->out_len = 0;
+    return rc;
+}
+
+/* Read once. Returns >0 if bytes were read (and any decoded frames pushed to the
+ * decoder), 0 on timeout/no data, -1 on close or error. Over a WebSocket the raw
+ * bytes are run through the frame parser (§10) before reaching the decoder. */
+static int conn_read(conn *c, aiomsg_decoder *dec) {
+    uint8_t buf[16384];
+    int n = raw_read(c, buf, sizeof(buf));
+    if (n <= 0) {
+        return n;
+    }
+    if (c->ws) {
+        int fr = aiomsg_ws_feed(c->ws, buf, (size_t)n, dec);
+        if (ws_flush_out(c) != 0) {
+            return -1;
+        }
+        return fr == 0 ? n : -1; /* fr<0: peer close or protocol error */
+    }
+    return aiomsg_decoder_push(dec, buf, (size_t)n) == 0 ? n : -1;
+}
+
+/* Write one framed aiomsg message. Over a WebSocket it becomes exactly one
+ * unmasked binary frame (§2.2). */
 static int conn_write_all(conn *c, const uint8_t *buf, size_t len) {
+    if (c->ws) {
+        size_t flen;
+        uint8_t *f = aiomsg_ws_encode(0x2, buf, len, &flen);
+        if (!f) {
+            return -1;
+        }
+        int rc = raw_write(c, f, flen);
+        free(f);
+        return rc;
+    }
+    return raw_write(c, buf, len);
+}
+
+static int raw_write(conn *c, const uint8_t *buf, size_t len) {
     size_t off = 0;
     while (off < len) {
         if (c->ssl) {
@@ -796,6 +844,89 @@ static void apply_client_verify(SSL *ssl, const char *name) {
  * this function owns and frees it; once registered, the broker owns it and frees
  * it when it processes the matching CONN_DOWN, so after sending CONN_DOWN we must
  * not touch it again. */
+/* Bind-side detection of raw aiomsg vs a WebSocket upgrade (PROTOCOL.md §10),
+ * run after TLS termination. Returns 0 (raw — the sniffed byte is replayed into
+ * the decoder), 1 (WebSocket upgraded — c->ws is set), or -1 (drop). Only the
+ * accept path calls this; the connect end never sniffs. */
+static int server_sniff(conn *c, aiomsg_decoder *dec) {
+    long deadline = now_ms() + HANDSHAKE_MS;
+    uint8_t first;
+    for (;;) {
+        int r = raw_read(c, &first, 1);
+        if (r > 0) {
+            break;
+        }
+        if (r < 0 || now_ms() >= deadline) {
+            return -1;
+        }
+    }
+    if (first == 0x00) { /* raw aiomsg: HELLO length prefix begins 0x00 */
+        return aiomsg_decoder_push(dec, &first, 1) == 0 ? 0 : -1;
+    }
+    if (first != 'G') {
+        return -1;
+    }
+
+    /* Accumulate the HTTP request through the blank line (cap ~8 KiB). */
+    uint8_t req[8192];
+    size_t rlen = 0;
+    req[rlen++] = 'G';
+    ssize_t term_end = -1;
+    while (term_end < 0 && rlen < sizeof(req)) {
+        uint8_t chunk[2048];
+        int r = raw_read(c, chunk, sizeof(chunk));
+        if (r < 0 || now_ms() >= deadline) {
+            return -1;
+        }
+        if (r == 0) {
+            continue;
+        }
+        for (int i = 0; i < r && rlen < sizeof(req); i++) {
+            req[rlen++] = chunk[i];
+        }
+        for (size_t k = 3; k < rlen; k++) {
+            if (req[k - 3] == '\r' && req[k - 2] == '\n' && req[k - 1] == '\r' && req[k] == '\n') {
+                term_end = (ssize_t)k + 1;
+                break;
+            }
+        }
+    }
+    if (term_end < 0) { /* no terminator within the cap */
+        const char *e = "HTTP/1.1 400 Bad Request\r\n\r\n";
+        raw_write(c, (const uint8_t *)e, strlen(e));
+        return -1;
+    }
+
+    uint8_t *resp = NULL;
+    size_t resp_len = 0;
+    int ok = aiomsg_ws_handshake_response(req, (size_t)term_end, &resp, &resp_len);
+    if (resp) {
+        raw_write(c, resp, resp_len);
+        free(resp);
+    }
+    if (ok != 0) {
+        return -1;
+    }
+
+    c->ws = malloc(sizeof(aiomsg_ws));
+    if (!c->ws) {
+        return -1;
+    }
+    aiomsg_ws_init(c->ws);
+
+    /* Bytes read past the request are the first WS frames; feed them now. */
+    size_t leftover = rlen - (size_t)term_end;
+    if (leftover) {
+        if (aiomsg_ws_feed(c->ws, req + term_end, leftover, dec) != 0) {
+            return -1;
+        }
+        if (ws_flush_out(c) != 0) {
+            return -1;
+        }
+    }
+    return 1;
+}
+
 static void conn_session(aiomsg_socket *s, int fd, const tls_setup *tls) {
     conn *c = calloc(1, sizeof(conn));
     if (!c) {
@@ -832,6 +963,12 @@ static void conn_session(aiomsg_socket *s, int fd, const tls_setup *tls) {
                 goto fail;
             }
         }
+    }
+
+    /* Bind side only: sniff raw-vs-WebSocket on the (decrypted) stream before
+     * any aiomsg bytes (PROTOCOL.md §10). The connect end never sniffs. */
+    if (tls->is_server && server_sniff(c, &dec) < 0) {
+        goto fail;
     }
 
     /* Handshake: send our HELLO, read and validate the peer's. */
@@ -919,6 +1056,21 @@ static void conn_session(aiomsg_socket *s, int fd, const tls_setup *tls) {
 teardown:
     /* Finished using `c` for I/O. Close the transport, then hand `c` to the
      * broker to free via CONN_DOWN. Do not touch `c` after pushing CONN_DOWN. */
+    if (c->ws) {
+        /* Best-effort WebSocket close (1000); do not wait for the echo. */
+        if (!c->ws->close_sent) {
+            uint8_t body[2] = {0x03, 0xE8};
+            size_t clen;
+            uint8_t *cf = aiomsg_ws_encode(0x8, body, 2, &clen);
+            if (cf) {
+                raw_write(c, cf, clen);
+                free(cf);
+            }
+        }
+        aiomsg_ws_free(c->ws);
+        free(c->ws);
+        c->ws = NULL;
+    }
     aiomsg_decoder_free(&dec);
     if (c->ssl) {
         SSL_free(c->ssl);
@@ -936,6 +1088,11 @@ teardown:
 
 fail:
     /* Failure before registration: the broker never knew about `c`. */
+    if (c->ws) {
+        aiomsg_ws_free(c->ws);
+        free(c->ws);
+        c->ws = NULL;
+    }
     aiomsg_decoder_free(&dec);
     if (c->ssl) {
         SSL_free(c->ssl);
