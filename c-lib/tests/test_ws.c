@@ -33,18 +33,17 @@ static size_t client_frame(uint8_t *out, int opcode, int fin, const uint8_t *pay
     return i + n;
 }
 
-/* Pull the whole aiomsg byte stream currently buffered in the decoder. */
-static size_t drain(aiomsg_decoder *d, uint8_t *out, size_t cap) {
-    /* The decoder groups by aiomsg frames, but here we push raw stream bytes
-     * that may not form full frames; instead we inspect via a data frame. */
-    (void)cap;
+/* Pop one reassembled envelope from `d` and assert it is a DATA frame carrying
+ * exactly `payload` (length `n`). The WS layer feeds decoded binary payload into
+ * the frame decoder as the raw §2 byte stream, so a test payload must itself be
+ * a real aiomsg frame for the decoder to yield it back. */
+static void expect_data(aiomsg_decoder *d, const char *payload, size_t n) {
     const uint8_t *env;
-    size_t env_len, total = 0;
-    while (aiomsg_decoder_pop(d, &env, &env_len)) {
-        memcpy(out + total, env, env_len);
-        total += env_len;
-    }
-    return total;
+    size_t env_len;
+    assert(aiomsg_decoder_pop(d, &env, &env_len) == 1);
+    aiomsg_envelope e;
+    assert(aiomsg_parse_envelope(env, env_len, &e) == 0);
+    assert(e.type == AIOMSG_T_DATA && e.payload_len == n && memcmp(e.payload, payload, n) == 0);
 }
 
 static void test_accept_vector(void) {
@@ -94,11 +93,15 @@ static void test_masked_binary(void) {
     aiomsg_ws_init(&w);
     aiomsg_decoder d;
     aiomsg_decoder_init(&d);
-    uint8_t frame[64];
-    size_t n = client_frame(frame, 0x2, 1, (const uint8_t *)"aiomsg-payload", 14);
+    /* One masked binary frame carrying a whole aiomsg DATA frame. */
+    size_t msg_len;
+    uint8_t *msg = aiomsg_frame_data((const uint8_t *)"aiomsg-payload", 14, &msg_len);
+    assert(msg);
+    uint8_t frame[128];
+    size_t n = client_frame(frame, 0x2, 1, msg, msg_len);
     assert(aiomsg_ws_feed(&w, frame, n, &d) == 0);
-    uint8_t out[64];
-    assert(drain(&d, out, sizeof(out)) == 14 && memcmp(out, "aiomsg-payload", 14) == 0);
+    expect_data(&d, "aiomsg-payload", 14);
+    free(msg);
     aiomsg_decoder_free(&d);
     aiomsg_ws_free(&w);
 }
@@ -108,17 +111,22 @@ static void test_fragmented(void) {
     aiomsg_ws_init(&w);
     aiomsg_decoder d;
     aiomsg_decoder_init(&d);
-    uint8_t buf[128];
+    /* Split one aiomsg DATA frame across three WS fragments (bin + 2 cont),
+     * fed a byte at a time to prove both WS and aiomsg reassembly. */
+    size_t msg_len;
+    uint8_t *msg = aiomsg_frame_data((const uint8_t *)"abcdefghi", 9, &msg_len);
+    assert(msg);
+    size_t a = msg_len / 3, b = msg_len / 3;
+    uint8_t buf[256];
     size_t n = 0;
-    n += client_frame(buf + n, 0x2, 0, (const uint8_t *)"abc", 3);
-    n += client_frame(buf + n, 0x0, 0, (const uint8_t *)"def", 3);
-    n += client_frame(buf + n, 0x0, 1, (const uint8_t *)"ghi", 3);
-    /* Feed a byte at a time to prove split frames reassemble. */
+    n += client_frame(buf + n, 0x2, 0, msg, a);
+    n += client_frame(buf + n, 0x0, 0, msg + a, b);
+    n += client_frame(buf + n, 0x0, 1, msg + a + b, msg_len - a - b);
     for (size_t i = 0; i < n; i++) {
         assert(aiomsg_ws_feed(&w, buf + i, 1, &d) == 0);
     }
-    uint8_t out[64];
-    assert(drain(&d, out, sizeof(out)) == 9 && memcmp(out, "abcdefghi", 9) == 0);
+    expect_data(&d, "abcdefghi", 9);
+    free(msg);
     aiomsg_decoder_free(&d);
     aiomsg_ws_free(&w);
 }

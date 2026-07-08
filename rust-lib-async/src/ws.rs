@@ -200,7 +200,11 @@ pub(crate) struct Prefixed<S> {
 
 impl<S> Prefixed<S> {
     fn new(prefix: Vec<u8>, inner: S) -> Self {
-        Self { inner, prefix, pos: 0 }
+        Self {
+            inner,
+            prefix,
+            pos: 0,
+        }
     }
 }
 
@@ -248,21 +252,21 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Prefixed<S> {
 /// that the write side flushes.
 pub(crate) struct WsStream<S> {
     inner: S,
-    in_buf: Vec<u8>,      // raw bytes read from inner, not yet parsed
-    ready: VecDeque<u8>,  // unmasked payload ready for poll_read
-    out_buf: Vec<u8>,     // encoded frames queued to write to inner
-    out_pos: usize,       // how much of out_buf has been flushed
+    in_buf: Vec<u8>,     // raw bytes read from inner, not yet parsed
+    ready: VecDeque<u8>, // unmasked payload ready for poll_read
+    out_buf: Vec<u8>,    // encoded frames queued to write to inner
+    out_pos: usize,      // how much of out_buf has been flushed
     close_sent: bool,
     eof: bool,
 }
 
 /// The outcome of parsing one client frame from `in_buf`.
 enum Parsed {
-    Need,          // incomplete: read more
+    Need, // incomplete: read more
     Payload(Vec<u8>),
-    Control,       // ping/pong handled; nothing to deliver
-    Eof,           // close frame: stream ends cleanly
-    Error,         // protocol violation: close queued, stream ends
+    Control, // ping/pong handled; nothing to deliver
+    Eof,     // close frame: stream ends cleanly
+    Error,   // protocol violation: close queued, stream ends
 }
 
 impl<S> WsStream<S> {
@@ -279,7 +283,8 @@ impl<S> WsStream<S> {
     }
 
     fn queue_frame(&mut self, opcode: u8, payload: &[u8]) {
-        self.out_buf.extend_from_slice(&server_frame(opcode, payload));
+        self.out_buf
+            .extend_from_slice(&server_frame(opcode, payload));
     }
 
     fn queue_close(&mut self, code: u16) {
@@ -654,7 +659,10 @@ mod tests {
 
     #[test]
     fn accept_key_rfc_vector() {
-        assert_eq!(compute_accept("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+        assert_eq!(
+            compute_accept("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
     }
 
     #[test]
@@ -670,7 +678,9 @@ mod tests {
     }
 
     // Drive a WsStream over an in-memory duplex; `client` is the peer side.
-    async fn ws_over(frames: &[u8]) -> (tokio::io::DuplexStream, WsStream<tokio::io::DuplexStream>) {
+    async fn ws_over(
+        frames: &[u8],
+    ) -> (tokio::io::DuplexStream, WsStream<tokio::io::DuplexStream>) {
         let (mut client, server) = tokio::io::duplex(65536);
         client.write_all(frames).await.unwrap();
         (client, WsStream::new(server))

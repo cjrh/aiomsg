@@ -33,11 +33,7 @@
 //! `docs/threading-and-tls.md`.
 
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read};
-// `Write` is only needed by the TLS send path (writing plaintext into the rustls
-// `Connection` and ciphertext to the socket).
-#[cfg(feature = "tls")]
-use std::io::Write;
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};

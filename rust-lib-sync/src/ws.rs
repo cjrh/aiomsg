@@ -237,10 +237,10 @@ fn parse_client_frame(buf: &[u8]) -> (Parsed, usize) {
 /// close echoed). A clean EOF or protocol violation surfaces as `read` == 0.
 pub struct WsStream<S> {
     inner: S,
-    rawbuf: Vec<u8>,       // unparsed inbound bytes
-    payload: Vec<u8>,      // decoded, not-yet-read binary payload
-    payload_pos: usize,    // read cursor into `payload`
-    chunk: Vec<u8>,        // scratch for inner reads
+    rawbuf: Vec<u8>,    // unparsed inbound bytes
+    payload: Vec<u8>,   // decoded, not-yet-read binary payload
+    payload_pos: usize, // read cursor into `payload`
+    chunk: Vec<u8>,     // scratch for inner reads
     close_sent: bool,
     eof: bool,
 }
@@ -263,7 +263,9 @@ impl<S: Read + Write> WsStream<S> {
             return;
         }
         self.close_sent = true;
-        let _ = self.inner.write_all(&server_frame(OP_CLOSE, &code.to_be_bytes()));
+        let _ = self
+            .inner
+            .write_all(&server_frame(OP_CLOSE, &code.to_be_bytes()));
         let _ = self.inner.flush();
     }
 
@@ -456,13 +458,8 @@ impl Sha1 {
 
     fn process_block(&mut self) {
         let mut w = [0u32; 80];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
-                self.block[i * 4],
-                self.block[i * 4 + 1],
-                self.block[i * 4 + 2],
-                self.block[i * 4 + 3],
-            ]);
+        for (word, chunk) in w.iter_mut().zip(self.block.chunks_exact(4)) {
+            *word = u32::from_be_bytes(chunk.try_into().unwrap());
         }
         for i in 16..80 {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
@@ -576,7 +573,10 @@ mod tests {
     }
     impl Duplex {
         fn new(input: Vec<u8>) -> Self {
-            Duplex { input: std::io::Cursor::new(input), output: Vec::new() }
+            Duplex {
+                input: std::io::Cursor::new(input),
+                output: Vec::new(),
+            }
         }
     }
     impl Read for Duplex {
@@ -630,7 +630,10 @@ mod tests {
 
     #[test]
     fn accept_key_rfc_vector() {
-        assert_eq!(accept_key("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+        assert_eq!(
+            accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
     }
 
     #[test]
@@ -657,7 +660,10 @@ mod tests {
 
     #[test]
     fn masked_binary_unmasked_into_stream() {
-        let mut ws = WsStream::new(Duplex::new(client_frame(OP_BIN, b"aiomsg-payload", true)), &[]);
+        let mut ws = WsStream::new(
+            Duplex::new(client_frame(OP_BIN, b"aiomsg-payload", true)),
+            &[],
+        );
         assert_eq!(read_all(&mut ws, 14), b"aiomsg-payload");
     }
 
@@ -681,16 +687,25 @@ mod tests {
 
     #[test]
     fn close_frame_echoes_and_ends() {
-        let mut ws = WsStream::new(Duplex::new(client_frame(OP_CLOSE, &1000u16.to_be_bytes(), true)), &[]);
+        let mut ws = WsStream::new(
+            Duplex::new(client_frame(OP_CLOSE, &1000u16.to_be_bytes(), true)),
+            &[],
+        );
         assert_eq!(read_all(&mut ws, 1), b"");
-        assert_eq!(ws.inner.output, server_frame(OP_CLOSE, &1000u16.to_be_bytes()));
+        assert_eq!(
+            ws.inner.output,
+            server_frame(OP_CLOSE, &1000u16.to_be_bytes())
+        );
     }
 
     #[test]
     fn text_frame_rejected_1003() {
         let mut ws = WsStream::new(Duplex::new(client_frame(OP_TEXT, b"hi", true)), &[]);
         assert_eq!(read_all(&mut ws, 1), b"");
-        assert_eq!(ws.inner.output, server_frame(OP_CLOSE, &1003u16.to_be_bytes()));
+        assert_eq!(
+            ws.inner.output,
+            server_frame(OP_CLOSE, &1003u16.to_be_bytes())
+        );
     }
 
     #[test]
@@ -700,13 +715,19 @@ mod tests {
         input.extend_from_slice(b"nope");
         let mut ws = WsStream::new(Duplex::new(input), &[]);
         assert_eq!(read_all(&mut ws, 1), b"");
-        assert_eq!(ws.inner.output, server_frame(OP_CLOSE, &1002u16.to_be_bytes()));
+        assert_eq!(
+            ws.inner.output,
+            server_frame(OP_CLOSE, &1002u16.to_be_bytes())
+        );
     }
 
     #[test]
     fn one_binary_frame_per_write() {
         let mut ws = WsStream::new(Duplex::new(Vec::new()), &[]);
         ws.write_all(b"\x00\x00\x00\x03abc").unwrap();
-        assert_eq!(ws.inner.output, server_frame(OP_BIN, b"\x00\x00\x00\x03abc"));
+        assert_eq!(
+            ws.inner.output,
+            server_frame(OP_BIN, b"\x00\x00\x00\x03abc")
+        );
     }
 }

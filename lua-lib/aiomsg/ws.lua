@@ -14,10 +14,11 @@
 --     §2, disposing of interleaved control frames (ping->pong, pong ignored,
 --     close echoed). WebSocket message boundaries carry no meaning.
 --
--- Requires Lua >= 5.3 for native bitwise operators (the rockspec already
--- mandates it). SHA-1 is hand-rolled here so the dependency set stays exactly
--- LuaSocket + LuaSec (LuaSec exposes no general digest); base64 is LuaSocket's
--- mime.
+-- Like the rest of aiomsg (see protocol.lua) this stays portable across Lua 5.1,
+-- LuaJIT and 5.3+ by doing its own arithmetic bit-twiddling rather than relying
+-- on the native bitwise operators, which only 5.3+ can even parse. SHA-1 is
+-- hand-rolled here so the dependency set stays exactly LuaSocket + LuaSec (LuaSec
+-- exposes no general digest); base64 is LuaSocket's mime.
 
 local mime = require("mime")
 
@@ -35,11 +36,57 @@ M.OP_PONG = 0xA
 
 M.MAX_REQUEST_BYTES = 8192 -- cap the pre-upgrade HTTP request
 
--- --- SHA-1 (hand-rolled, pure Lua 5.3+) --------------------------------------
+-- --- Portable 32-bit bitwise ops --------------------------------------------
+--
+-- Bit-by-bit over Lua numbers, so this module parses and runs on 5.1/LuaJIT as
+-- well as 5.3+ (see the note at the top). Operands and results are unsigned
+-- 32-bit values; every intermediate stays below 2^32, well within a double's
+-- exact-integer range. Only SHA-1 needs the full and/or/xor; the frame layer
+-- gets by with plain arithmetic.
 
-local function rotl32(v, n)
-  return ((v << n) | (v >> (32 - n))) & 0xFFFFFFFF
+local function band(a, b)
+  local r, bit = 0, 1
+  while a > 0 and b > 0 do
+    if a % 2 == 1 and b % 2 == 1 then
+      r = r + bit
+    end
+    a, b, bit = math.floor(a / 2), math.floor(b / 2), bit * 2
+  end
+  return r
 end
+
+local function bor(a, b)
+  local r, bit = 0, 1
+  while a > 0 or b > 0 do
+    if a % 2 == 1 or b % 2 == 1 then
+      r = r + bit
+    end
+    a, b, bit = math.floor(a / 2), math.floor(b / 2), bit * 2
+  end
+  return r
+end
+
+local function bxor(a, b)
+  local r, bit = 0, 1
+  while a > 0 or b > 0 do
+    if a % 2 ~= b % 2 then
+      r = r + bit
+    end
+    a, b, bit = math.floor(a / 2), math.floor(b / 2), bit * 2
+  end
+  return r
+end
+
+-- Left-rotate a 32-bit word by n bits (0 < n < 32). The shifted-out high bits
+-- and the surviving low bits land in disjoint positions, so a plain add rebuilds
+-- the word, and neither term ever reaches 2^32.
+local function rotl32(x, n)
+  x = x % 0x100000000
+  local hi = 2 ^ (32 - n)
+  return (x % hi) * (2 ^ n) + math.floor(x / hi)
+end
+
+-- --- SHA-1 (hand-rolled: LuaSec exposes no digest) ---------------------------
 
 -- SHA-1 digest of a byte string, returned as 20 raw bytes.
 local function sha1(msg)
@@ -52,44 +99,47 @@ local function sha1(msg)
   local hi = math.floor(ml / 4294967296) % 4294967296
   local lo = ml % 4294967296
   msg = msg
-    .. string.char((hi >> 24) & 0xff, (hi >> 16) & 0xff, (hi >> 8) & 0xff, hi & 0xff,
-                   (lo >> 24) & 0xff, (lo >> 16) & 0xff, (lo >> 8) & 0xff, lo & 0xff)
+    .. string.char(math.floor(hi / 16777216) % 256, math.floor(hi / 65536) % 256,
+                   math.floor(hi / 256) % 256, hi % 256,
+                   math.floor(lo / 16777216) % 256, math.floor(lo / 65536) % 256,
+                   math.floor(lo / 256) % 256, lo % 256)
   for chunk = 1, #msg, 64 do
     local w = {}
     for i = 0, 15 do
       local a, b, c, d = string.byte(msg, chunk + i * 4, chunk + i * 4 + 3)
-      w[i] = ((a << 24) | (b << 16) | (c << 8) | d) & 0xFFFFFFFF
+      w[i] = a * 16777216 + b * 65536 + c * 256 + d
     end
     for i = 16, 79 do
-      w[i] = rotl32(w[i - 3] ~ w[i - 8] ~ w[i - 14] ~ w[i - 16], 1)
+      w[i] = rotl32(bxor(bxor(bxor(w[i - 3], w[i - 8]), w[i - 14]), w[i - 16]), 1)
     end
     local a, b, c, d, e = h0, h1, h2, h3, h4
     for i = 0, 79 do
       local f, k
       if i < 20 then
-        f = (b & c) | ((~b & 0xFFFFFFFF) & d)
+        f = bor(band(b, c), band(0xFFFFFFFF - b, d))
         k = 0x5A827999
       elseif i < 40 then
-        f = b ~ c ~ d
+        f = bxor(bxor(b, c), d)
         k = 0x6ED9EBA1
       elseif i < 60 then
-        f = (b & c) | (b & d) | (c & d)
+        f = bor(bor(band(b, c), band(b, d)), band(c, d))
         k = 0x8F1BBCDC
       else
-        f = b ~ c ~ d
+        f = bxor(bxor(b, c), d)
         k = 0xCA62C1D6
       end
-      local temp = (rotl32(a, 5) + f + e + k + w[i]) & 0xFFFFFFFF
+      local temp = (rotl32(a, 5) + f + e + k + w[i]) % 0x100000000
       e, d, c, b, a = d, c, rotl32(b, 30), a, temp
     end
-    h0 = (h0 + a) & 0xFFFFFFFF
-    h1 = (h1 + b) & 0xFFFFFFFF
-    h2 = (h2 + c) & 0xFFFFFFFF
-    h3 = (h3 + d) & 0xFFFFFFFF
-    h4 = (h4 + e) & 0xFFFFFFFF
+    h0 = (h0 + a) % 0x100000000
+    h1 = (h1 + b) % 0x100000000
+    h2 = (h2 + c) % 0x100000000
+    h3 = (h3 + d) % 0x100000000
+    h4 = (h4 + e) % 0x100000000
   end
   local function bytes(h)
-    return string.char((h >> 24) & 0xff, (h >> 16) & 0xff, (h >> 8) & 0xff, h & 0xff)
+    return string.char(math.floor(h / 16777216) % 256, math.floor(h / 65536) % 256,
+                       math.floor(h / 256) % 256, h % 256)
   end
   return bytes(h0) .. bytes(h1) .. bytes(h2) .. bytes(h3) .. bytes(h4)
 end
@@ -169,19 +219,21 @@ function M.encode(opcode, payload)
   local header
   -- TODO(frame-size): enforce a configurable maximum frame length
   if n < 126 then
-    header = string.char(0x80 | opcode, n)
+    header = string.char(0x80 + opcode, n)
   elseif n < 65536 then
-    header = string.char(0x80 | opcode, 126, (n >> 8) & 0xff, n & 0xff)
+    header = string.char(0x80 + opcode, 126, math.floor(n / 256) % 256, n % 256)
   else
-    header = string.char(0x80 | opcode, 127,
-      (n >> 56) & 0xff, (n >> 48) & 0xff, (n >> 40) & 0xff, (n >> 32) & 0xff,
-      (n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff)
+    header = string.char(0x80 + opcode, 127,
+      math.floor(n / 2 ^ 56) % 256, math.floor(n / 2 ^ 48) % 256,
+      math.floor(n / 2 ^ 40) % 256, math.floor(n / 2 ^ 32) % 256,
+      math.floor(n / 2 ^ 24) % 256, math.floor(n / 2 ^ 16) % 256,
+      math.floor(n / 256) % 256, n % 256)
   end
   return header .. payload
 end
 
 local function u16(code)
-  return string.char((code >> 8) & 0xff, code & 0xff)
+  return string.char(math.floor(code / 256) % 256, code % 256)
 end
 
 -- Try to parse one masked client frame from `buf`.
@@ -192,15 +244,15 @@ local function parse_frame(buf)
     return nil
   end
   local b0, b1 = string.byte(buf, 1, 2)
-  if (b0 >> 4) & 0x7 ~= 0 then -- any RSV bit set
+  if math.floor(b0 / 16) % 8 ~= 0 then -- any RSV bit set
     return nil, nil, 1002
   end
-  local fin = (b0 >> 7) & 1
-  local opcode = b0 & 0x0f
-  if (b1 >> 7) & 1 ~= 1 then -- every client frame MUST be masked
+  local fin = math.floor(b0 / 128) % 2
+  local opcode = b0 % 16
+  if math.floor(b1 / 128) % 2 ~= 1 then -- every client frame MUST be masked
     return nil, nil, 1002
   end
-  local len = b1 & 0x7f
+  local len = b1 % 128
   local offset = 2
   if len == 126 then
     if #buf < 4 then
@@ -215,7 +267,7 @@ local function parse_frame(buf)
     end
     -- TODO(frame-size): enforce a configurable maximum frame length
     local b3 = string.byte(buf, 3)
-    if (b3 >> 7) & 1 == 1 then -- 64-bit length MSB MUST be 0
+    if math.floor(b3 / 128) % 2 == 1 then -- 64-bit length MSB MUST be 0
       return nil, nil, 1002
     end
     len = 0
@@ -234,7 +286,7 @@ local function parse_frame(buf)
   local masked = string.sub(buf, offset + 5, offset + 4 + len)
   local out = {}
   for i = 1, len do
-    out[i] = string.char(string.byte(masked, i) ~ mask[(i - 1) % 4 + 1])
+    out[i] = string.char(bxor(string.byte(masked, i), mask[(i - 1) % 4 + 1]))
   end
   return { opcode = opcode, fin = fin, payload = table.concat(out) }, offset + 4 + len
 end
