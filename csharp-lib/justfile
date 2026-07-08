@@ -16,6 +16,12 @@ build:
 test:
     dotnet test
 
+# Run tests with dotnet-coverage (LCOV output for coverage services).
+coverage:
+    dotnet tool restore
+    dotnet tool run dotnet-coverage collect -f cobertura -o coverage.cobertura.xml -- dotnet test
+    python3 ../tools/coverage/cobertura_to_lcov.py coverage.cobertura.xml coverage.lcov Aiomsg
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example:
     dotnet run --project Examples -- {{example}}

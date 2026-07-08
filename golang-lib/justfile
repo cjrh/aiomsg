@@ -9,6 +9,12 @@ default:
 test:
     go test ./...
 
+# Run all tests, then collect library package coverage (LCOV output for coverage services).
+coverage:
+    go test ./...
+    go test -coverprofile=coverage.out .
+    python3 ../tools/coverage/go_to_lcov.py coverage.out coverage.lcov
+
 # Build everything (library, examples, conformance agent).
 build:
     go build ./...

@@ -58,9 +58,69 @@ test-csharp:
 test-lua:
     cd lua-lib && just test
 
+# Run the browser JavaScript implementation's test suite.
+test-browser:
+    cd browser-lib && just test
+
 # Run the cross-language conformance (interop) suite.
 test-conformance:
     uv run --project python-lib --group test pytest conformance/ -v
+
+# Run the Python implementation's coverage suite.
+coverage-python:
+    cd python-lib && just coverage
+
+# Run the blocking Python implementation's coverage suite.
+coverage-python-blocking:
+    cd python-lib-blocking && just coverage
+
+# Run the async Rust implementation's coverage suite.
+coverage-rust-async:
+    cd rust-lib-async && just coverage
+
+# Run the sync Rust implementation's coverage suite.
+coverage-rust-sync:
+    cd rust-lib-sync && just coverage
+
+# Run the Go implementation's coverage suite.
+coverage-golang:
+    cd golang-lib && just coverage
+
+# Run the C implementation's coverage suite.
+coverage-c:
+    cd c-lib && just coverage
+
+# Run the sync C++ implementation's coverage suite.
+coverage-cpp-sync:
+    cd cpp-lib-sync && just coverage
+
+# Run the async C++ implementation's coverage suite.
+coverage-cpp-async:
+    cd cpp-lib-async && just coverage
+
+# Run the Zig implementation's coverage suite (requires kcov).
+coverage-zig:
+    cd zig-lib && just coverage
+
+# Run the Java implementation's coverage suite.
+coverage-java:
+    cd java-lib && just coverage
+
+# Run the JavaScript (Node) implementation's coverage suite.
+coverage-javascript:
+    cd javascript-lib && just coverage
+
+# Run the browser JavaScript implementation's coverage suite.
+coverage-browser:
+    cd browser-lib && just coverage
+
+# Run the C# implementation's coverage suite.
+coverage-csharp:
+    cd csharp-lib && just coverage
+
+# Run the Lua implementation's coverage suite.
+coverage-lua:
+    cd lua-lib && just coverage
 
 # Syntax-check GitHub Actions workflows without adding PyYAML to any project env.
 lint-ci:
@@ -129,10 +189,23 @@ test-all:
     #!/usr/bin/env bash
     set -uo pipefail
     rc=0
-    for d in python-lib python-lib-blocking rust-lib-async rust-lib-sync golang-lib c-lib cpp-lib-sync cpp-lib-async zig-lib java-lib javascript-lib csharp-lib lua-lib; do
+    for d in python-lib python-lib-blocking rust-lib-async rust-lib-sync golang-lib c-lib cpp-lib-sync cpp-lib-async zig-lib java-lib javascript-lib browser-lib csharp-lib lua-lib; do
         if [[ -f "$d/justfile" ]]; then
             echo "=== $d ==="
             (cd "$d" && just test) || rc=1
+        fi
+    done
+    exit $rc
+
+# Run every implementation's coverage suite and leave coverage.lcov in each dir.
+coverage-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for d in python-lib python-lib-blocking rust-lib-async rust-lib-sync golang-lib c-lib cpp-lib-sync cpp-lib-async zig-lib java-lib javascript-lib browser-lib csharp-lib lua-lib; do
+        if [[ -f "$d/justfile" ]]; then
+            echo "=== $d coverage ==="
+            (cd "$d" && just coverage) || rc=1
         fi
     done
     exit $rc

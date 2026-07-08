@@ -10,6 +10,11 @@ build:
 test:
     ./gradlew test
 
+# Run tests with JaCoCo coverage (LCOV output for coverage services).
+coverage:
+    ./gradlew test jacocoTestReport
+    python3 ../tools/coverage/jacoco_to_lcov.py build/reports/jacoco/test/jacocoTestReport.xml coverage.lcov src/main/java src/main/java/aiomsg
+
 # Run an example: `just run Server`, `just run Client`, or `just run Tls`.
 run example:
     ./gradlew run{{example}}
@@ -20,3 +25,4 @@ agent *ARGS:
 
 clean:
     ./gradlew clean
+    rm -f coverage.lcov

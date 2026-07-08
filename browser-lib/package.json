@@ -11,7 +11,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-exclude='test/**/*.js' --test-reporter=lcov > coverage.lcov"
   },
   "license": "Apache-2.0"
 }

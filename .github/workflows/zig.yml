@@ -7,6 +7,7 @@ on:
     paths:
       - 'zig-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/zig.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'zig-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/zig.yml'
 
 defaults:
@@ -27,14 +29,19 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Install OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: Install coverage/build dependencies
+        run: sudo apt-get update && sudo apt-get install -y kcov libssl-dev
       # The library uses Zig 0.16's std.Io, so the version is pinned.
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
       - uses: extractions/setup-just@v4
-      # `just test` runs `zig build test`: protocol unit tests + the in-process
-      # TCP/TLS integration test.
-      - name: Test
-        run: just test
+      # `just coverage` builds Zig test binaries, runs them under kcov, and
+      # writes LCOV for the protocol unit tests + TCP/TLS integration test.
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: zig-lib/coverage.lcov
+          flag-name: zig

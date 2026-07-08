@@ -7,6 +7,7 @@ on:
     paths:
       - 'lua-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/lua.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'lua-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/lua.yml'
 
 defaults:
@@ -36,6 +38,12 @@ jobs:
           sudo luarocks install luasocket
           sudo luarocks install luasec
       - uses: extractions/setup-just@v4
-      # `just test` runs the protocol unit tests + the TCP/TLS integration test.
-      - name: Test
-        run: just test
+      # `just coverage` runs the protocol unit tests + TCP/TLS integration test
+      # under a Lua line hook and writes LCOV.
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: lua-lib/coverage.lcov
+          flag-name: lua

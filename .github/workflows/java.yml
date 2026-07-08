@@ -7,6 +7,7 @@ on:
     paths:
       - 'java-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/java.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'java-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/java.yml'
 
 defaults:
@@ -34,7 +36,11 @@ jobs:
           java-version: '21'
           cache: gradle
       - uses: extractions/setup-just@v4
-      # `just test` runs `./gradlew test` (the committed wrapper fetches Gradle):
-      # the JUnit 5 protocol unit tests + the in-process TCP/TLS integration test.
-      - name: Test
-        run: just test
+      # `just coverage` runs the JUnit 5 tests, JaCoCo, and LCOV conversion.
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: java-lib/coverage.lcov
+          flag-name: java

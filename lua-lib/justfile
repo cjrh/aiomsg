@@ -15,6 +15,10 @@ test:
     lua test/protocol_test.lua
     lua test/integration_test.lua
 
+# Run tests with debug-hook line coverage (LCOV output for coverage services).
+coverage:
+    python3 ../tools/coverage/lua_line_coverage.py coverage.lcov test/protocol_test.lua test/integration_test.lua
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example:
     lua examples/{{example}}.lua

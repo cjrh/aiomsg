@@ -7,6 +7,7 @@ on:
     paths:
       - 'c-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/c.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'c-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/c.yml'
 
 defaults:
@@ -27,10 +29,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Install OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: Install coverage/build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libssl-dev
       - uses: extractions/setup-just@v4
-      # `just test` configures with CMake, builds, and runs CTest (protocol unit
-      # tests + the in-process TCP/TLS integration test) — exactly as run locally.
-      - name: Test
-        run: just test
+      # `just coverage` configures with CMake/Clang, runs CTest, and writes LCOV
+      # for the protocol unit tests + the in-process TCP/TLS integration test.
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: c-lib/coverage.lcov
+          flag-name: c

@@ -6,12 +6,14 @@ on:
       - master
     paths:
       - 'golang-lib/**'
+      - 'tools/coverage/**'
       - '.github/workflows/golang.yml'
   pull_request:
     branches:
       - master
     paths:
       - 'golang-lib/**'
+      - 'tools/coverage/**'
       - '.github/workflows/golang.yml'
 
 defaults:
@@ -28,9 +30,15 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
+      - uses: extractions/setup-just@v4
       - name: Format check
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
-      - name: Test
-        run: go test ./...
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: golang-lib/coverage.lcov
+          flag-name: go

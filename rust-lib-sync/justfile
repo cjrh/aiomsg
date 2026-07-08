@@ -9,6 +9,10 @@ default:
 test:
     cargo test
 
+# Run tests with line coverage (LCOV output for coverage services).
+coverage:
+    cargo llvm-cov --lib --tests --ignore-filename-regex '(/tests/|/examples/)' --lcov --output-path coverage.lcov
+
 # Build the crate.
 build:
     cargo build
