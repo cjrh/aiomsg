@@ -33,14 +33,10 @@
 //! `docs/threading-and-tls.md`.
 
 use std::collections::HashMap;
-use std::io::{ErrorKind, Read};
-// `Write` is only needed by the TLS send path (writing plaintext into the rustls
-// `Connection` and ciphertext to the socket).
-#[cfg(feature = "tls")]
-use std::io::Write;
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -54,6 +50,10 @@ pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const ACCEPT_POLL: Duration = Duration::from_millis(50);
+/// Read poll interval for the single-threaded WebSocket/sniffed sessions: a
+/// read blocks at most this long before the loop can service queued writes and
+/// heartbeats (the same ~50 ms latency as the other synchronous ports).
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(crate) type ReconnectDelay = Arc<dyn Fn() -> Duration + Send + Sync>;
 
@@ -121,7 +121,7 @@ pub(crate) fn accept_loop(
                 let cmd_tx = cmd_tx.clone();
                 let reg = registry.clone();
                 handlers.push(thread::spawn(move || {
-                    handle_connection(stream, Wrap::accept(acceptor), cmd_tx, identity, reg);
+                    handle_connection(stream, Wrap::accept(acceptor), cmd_tx, identity, reg, true);
                 }));
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
@@ -150,6 +150,7 @@ pub(crate) fn connect_loop(
                 cmd_tx.clone(),
                 identity,
                 registry.clone(),
+                false,
             );
         }
         if shutdown.load(Ordering::SeqCst) {
@@ -204,6 +205,7 @@ fn handle_connection(
     cmd_tx: Sender<Command>,
     identity: Identity,
     registry: Registry,
+    sniff: bool,
 ) {
     let _ = raw.set_nodelay(true);
     // A clone registered for shutdown so close() can unblock the reader's
@@ -214,17 +216,17 @@ fn handle_connection(
     };
 
     match wrap {
-        Wrap::Plain => plain_session(raw, &cmd_tx, identity),
+        Wrap::Plain => plain_or_ws_session(raw, &cmd_tx, identity, sniff),
         #[cfg(feature = "tls")]
         Wrap::TlsServer(cfg) => {
             if let Ok(conn) = rustls::ServerConnection::new(cfg) {
-                tls_session(conn, raw, &cmd_tx, identity);
+                tls_session(conn, raw, &cmd_tx, identity, sniff);
             }
         }
         #[cfg(feature = "tls")]
         Wrap::TlsClient(cfg, name) => {
             if let Ok(conn) = rustls::ClientConnection::new(cfg, name) {
-                tls_session(conn, raw, &cmd_tx, identity);
+                tls_session(conn, raw, &cmd_tx, identity, false);
             }
         }
     }
@@ -298,6 +300,215 @@ fn forward_frames(decoder: &mut FrameDecoder, cmd_tx: &Sender<Command>, peer: Id
         }
     }
     true
+}
+
+// ---------------------------------------------------------------------------
+// Bind-side sniff (PROTOCOL.md §10): peek the first byte without consuming it to
+// route raw aiomsg (`0x00`) vs a WebSocket HTTP upgrade (`'G'`); anything else is
+// closed. The peek is timeout-bounded by the socket's read timeout so a client
+// that connects and sends nothing cannot hold the slot indefinitely.
+// ---------------------------------------------------------------------------
+
+fn plain_or_ws_session(
+    read_stream: TcpStream,
+    cmd_tx: &Sender<Command>,
+    my_identity: Identity,
+    sniff: bool,
+) {
+    if !sniff {
+        plain_session(read_stream, cmd_tx, my_identity);
+        return;
+    }
+    // Bound the peek (and, on the WS path, the whole poll loop) with a read
+    // timeout so a byte never blocks forever. The raw path resets its own
+    // heartbeat-length timeout inside plain_session.
+    let _ = read_stream.set_read_timeout(Some(POLL_INTERVAL));
+    let deadline = Instant::now() + HEARTBEAT_TIMEOUT;
+    match peek_first_byte(&read_stream, deadline) {
+        Some(0x00) => plain_session(read_stream, cmd_tx, my_identity),
+        Some(b'G') => ws_session(read_stream, None, cmd_tx, my_identity, deadline),
+        _ => {} // unrecognised first byte, or nothing arrived: close.
+    }
+}
+
+/// Peek (without consuming) the first inbound byte, retrying while the socket's
+/// read timeout fires until `deadline`. Returns `None` on EOF/deadline/error so
+/// the caller closes the connection.
+fn peek_first_byte(stream: &TcpStream, deadline: Instant) -> Option<u8> {
+    let mut b = [0u8; 1];
+    loop {
+        match stream.peek(&mut b) {
+            Ok(0) => return None,
+            Ok(_) => return Some(b[0]),
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Read exactly one byte, retrying on read-timeout ticks until `deadline`. Used
+/// to sniff the first decrypted byte on the TLS bind path, where the stream
+/// cannot be peeked without consuming.
+#[cfg(feature = "tls")]
+fn read_one_byte<R: Read>(r: &mut R, deadline: Instant) -> Option<u8> {
+    let mut b = [0u8; 1];
+    loop {
+        match r.read(&mut b) {
+            Ok(0) => return None,
+            Ok(_) => return Some(b[0]),
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket sub-transport (PROTOCOL.md §10): a single-threaded session. Unlike
+// raw TCP, the WS framing state (masking, control frames, fragment reassembly)
+// is one stateful stream that cannot be split across a reader and writer thread,
+// so one thread multiplexes: it polls inbound with a short read timeout while
+// draining queued outbound frames and emitting heartbeats on send-idle. The
+// ~POLL_INTERVAL added latency matches the other synchronous ports.
+//
+// Generic over the upgraded stream's inner transport `S` (plain `TcpStream` or a
+// TLS `StreamOwned`); `first` is the sniff byte already consumed on the TLS path
+// (`None` when the plain path peeked without consuming — see §2.1 of the plan).
+// ---------------------------------------------------------------------------
+
+fn ws_session<S: Read + Write>(
+    stream: S,
+    first: Option<u8>,
+    cmd_tx: &Sender<Command>,
+    my_identity: Identity,
+    deadline: Instant,
+) {
+    let mut ws = match crate::ws::accept_upgrade(stream, first, deadline) {
+        Ok(Some(ws)) => ws,
+        _ => return, // rejected upgrade (error response already written) or io error
+    };
+    // Our HELLO is the first binary message; the peer's HELLO follows.
+    if protocol::write_frame(&mut ws, &protocol::hello(&my_identity)).is_err() {
+        return;
+    }
+    let mut decoder = FrameDecoder::new();
+    let peer = match ws_read_hello(&mut ws, &mut decoder, deadline) {
+        Some(id) => id,
+        None => return,
+    };
+    let writer_rx = match register(cmd_tx, peer) {
+        Some(rx) => rx,
+        None => return,
+    };
+
+    // Hand over any frames pipelined into the same WS message(s) as the HELLO.
+    if !forward_frames(&mut decoder, cmd_tx, peer) {
+        let _ = cmd_tx.send(Command::ConnectionDown { identity: peer });
+        return;
+    }
+
+    let mut last_send = Instant::now();
+    let mut last_recv = Instant::now();
+    let mut buf = [0u8; 16 * 1024];
+    loop {
+        // Drain everything the broker has queued for this connection.
+        loop {
+            match writer_rx.try_recv() {
+                Ok(frame) => {
+                    if protocol::write_frame(&mut ws, &frame).is_err() {
+                        break;
+                    }
+                    last_send = Instant::now();
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    // Broker dropped this connection (e.g. duplicate identity).
+                    return;
+                }
+            }
+        }
+        // Heartbeat when we've been quiet, and give up on a silent peer.
+        if last_send.elapsed() >= HEARTBEAT_INTERVAL {
+            if protocol::write_frame(&mut ws, &protocol::heartbeat()).is_err() {
+                break;
+            }
+            last_send = Instant::now();
+        }
+        if last_recv.elapsed() >= HEARTBEAT_TIMEOUT {
+            break;
+        }
+        // Poll inbound; a read timeout is a normal idle tick, not an error.
+        match ws.read(&mut buf) {
+            Ok(0) => break, // clean WS close / EOF
+            Ok(n) => {
+                last_recv = Instant::now();
+                decoder.extend_from(&buf[..n]);
+                if !forward_frames(&mut decoder, cmd_tx, peer) {
+                    break;
+                }
+            }
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = cmd_tx.send(Command::ConnectionDown { identity: peer });
+}
+
+/// Read the peer's HELLO from a WebSocket stream, tolerating poll-timeout reads
+/// until `deadline`. Bytes arrive as the payloads of binary WS messages and are
+/// fed to the same frame decoder as raw TCP.
+fn ws_read_hello<S: Read>(
+    ws: &mut S,
+    decoder: &mut FrameDecoder,
+    deadline: Instant,
+) -> Option<Identity> {
+    let mut buf = [0u8; 4096];
+    loop {
+        if let Some(frame) = decoder.pop() {
+            return match protocol::decode(&frame) {
+                Some(Envelope::Hello { version, identity })
+                    if version == protocol::PROTOCOL_VERSION =>
+                {
+                    Some(identity)
+                }
+                _ => None,
+            };
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        match ws.read(&mut buf) {
+            Ok(0) => return None,
+            Ok(n) => decoder.extend_from(&buf[..n]),
+            Err(ref e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -378,8 +589,13 @@ fn plain_writer(mut stream: TcpStream, writer_rx: Receiver<Bytes>) {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "tls")]
-fn tls_session<C, SD>(conn: C, raw: TcpStream, cmd_tx: &Sender<Command>, my_identity: Identity)
-where
+fn tls_session<C, SD>(
+    conn: C,
+    raw: TcpStream,
+    cmd_tx: &Sender<Command>,
+    my_identity: Identity,
+    sniff: bool,
+) where
     C: std::ops::DerefMut<Target = rustls::ConnectionCommon<SD>> + Send + 'static,
     SD: rustls::SideData + 'static,
 {
@@ -388,10 +604,31 @@ where
     // Handshake + HELLO exchange on this single thread, driven through a
     // temporary StreamOwned (which performs the TLS handshake on first I/O).
     let mut stream = rustls::StreamOwned::new(conn, raw);
+    let mut decoder = FrameDecoder::new();
+
+    // Bind-side sniff runs on the decrypted stream (§1.3): read one plaintext
+    // byte to route raw aiomsg vs a WebSocket upgrade. A WS client sends its
+    // HTTP GET before any aiomsg bytes, so we must not send our HELLO until the
+    // upgrade completes — hence the sniff precedes the HELLO write.
+    if sniff {
+        let deadline = Instant::now() + HEARTBEAT_TIMEOUT;
+        match read_one_byte(&mut stream, deadline) {
+            Some(b'G') => {
+                let _ = stream.sock.set_read_timeout(Some(POLL_INTERVAL));
+                let deadline = Instant::now() + HEARTBEAT_TIMEOUT;
+                ws_session(stream, Some(b'G'), cmd_tx, my_identity, deadline);
+                return;
+            }
+            // Raw aiomsg: the consumed `0x00` is the first byte of the peer's
+            // HELLO length prefix; seed it so the decoder sees the whole frame.
+            Some(0x00) => decoder.extend_from(&[0x00]),
+            _ => return, // unrecognised first byte, or nothing arrived: close.
+        }
+    }
+
     if protocol::write_frame(&mut stream, &protocol::hello(&my_identity)).is_err() {
         return;
     }
-    let mut decoder = FrameDecoder::new();
     let peer = match read_hello(&mut stream, &mut decoder) {
         Some(id) => id,
         None => return,

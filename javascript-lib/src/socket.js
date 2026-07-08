@@ -32,6 +32,7 @@ import {
   frameHello,
   parseEnvelope,
 } from "./protocol.js";
+import { sniffAndUpgrade } from "./ws.js";
 
 export const SendMode = Object.freeze({ ROUND_ROBIN: "round-robin", PUBLISH: "publish" });
 export const Delivery = Object.freeze({ AT_MOST_ONCE: "at-most-once", AT_LEAST_ONCE: "at-least-once" });
@@ -133,7 +134,7 @@ export class Socket {
    */
   bind(host, port, { tls: tlsOpts } = {}) {
     return new Promise((resolve, reject) => {
-      const onConn = (socket) => this.#runConnection(socket, true);
+      const onConn = (socket) => this.#accept(socket);
       const server = tlsOpts
         ? tls.createServer({ ...tlsOpts }, onConn)
         : net.createServer(onConn);
@@ -229,9 +230,22 @@ export class Socket {
     this.#runConnection(socket, false);
   }
 
+  // Bind-side accept: sniff raw-vs-WebSocket (PROTOCOL.md §10) before running
+  // the ordinary connection handler. The connect end never receives WebSocket,
+  // so it calls #runConnection directly.
+  async #accept(socket) {
+    const result = await sniffAndUpgrade(socket);
+    if (!result || this.closed) {
+      if (result) result.socket.destroy();
+      return;
+    }
+    this.#runConnection(result.socket, true, result.prebuffer);
+  }
+
   // Drive one connection: HELLO exchange, registration, then frame delivery
-  // until the peer goes quiet or away.
-  #runConnection(socket, isServer) {
+  // until the peer goes quiet or away. `prebuffer` carries bytes already read
+  // during the raw-vs-WS sniff (bind path only) that must seed the decoder.
+  #runConnection(socket, isServer, prebuffer) {
     this.sockets.add(socket);
     const conn = new Conn(socket);
     socket.setNoDelay(true);
@@ -246,6 +260,10 @@ export class Socket {
     socket.on("data", (chunk) => this.#onData(conn, chunk));
     socket.on("error", () => {}); // 'close' handles teardown
     socket.once("close", () => this.#teardown(conn));
+
+    // Seed the decoder with bytes consumed by the sniff before this handler's
+    // 'data' listener existed (the sniffed first byte, and any pipelined frames).
+    if (prebuffer && prebuffer.length) this.#onData(conn, prebuffer);
   }
 
   #onData(conn, chunk) {

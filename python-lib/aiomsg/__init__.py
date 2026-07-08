@@ -60,6 +60,7 @@ from typing import (
 
 from . import envelope
 from . import msgproto
+from . import ws
 
 __all__ = ["Søcket", "SendMode", "DeliveryGuarantee"]
 
@@ -193,7 +194,7 @@ class Søcket:
         self.check_socket_type()
         logger.info(f"Binding socket {self.idstr()} to {hostname}:{port}")
         self.server = await asyncio.start_server(
-            self._connection,
+            self._accept,
             hostname,
             port,
             ssl=ssl_context,
@@ -299,6 +300,24 @@ class Søcket:
         """
         while True:
             yield await self.recv_identity()
+
+    async def _accept(self, reader: StreamReader, writer: StreamWriter):
+        """Bind-side accept path: sniff raw-vs-WebSocket (PROTOCOL.md §10), then
+        run the ordinary connection handler over the resulting byte-stream pair.
+
+        The connect end never receives WebSocket, so it calls ``_connection``
+        directly; only accepted (bind) connections pass through this sniff.
+        """
+        wrapped = await ws.sniff_and_wrap(reader, writer)
+        if wrapped is None:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (OSError, asyncio.CancelledError):
+                pass
+            return
+        conn_reader, conn_writer = wrapped
+        await self._connection(conn_reader, conn_writer)
 
     async def _connection(self, reader: StreamReader, writer: StreamWriter):
         """Each new connection will create a task with this coroutine."""

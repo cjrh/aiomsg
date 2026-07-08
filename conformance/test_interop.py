@@ -9,6 +9,7 @@ source sent.
 Run with:  just test-conformance   (from the repo root)
 """
 
+import asyncio
 import json
 import os
 import socket
@@ -35,6 +36,8 @@ CSHARP_DIR = REPO_ROOT / "csharp-lib"
 LUA_DIR = REPO_ROOT / "lua-lib"
 PY_AGENT = REPO_ROOT / "conformance" / "agents" / "python_agent.py"
 PY_BLOCKING_AGENT = REPO_ROOT / "conformance" / "agents" / "python_blocking_agent.py"
+WS_AGENT = REPO_ROOT / "conformance" / "agents" / "ws_agent.py"
+BROWSER_AGENT = REPO_ROOT / "browser-lib" / "conformance_agent.js"
 JS_AGENT = JS_DIR / "conformance_agent.js"
 LUA_AGENT = LUA_DIR / "conformance_agent.lua"
 # Shared self-signed cert (regenerate with rust-lib-async's gen_test_certs
@@ -182,8 +185,61 @@ TLS_SCENARIOS = [
     ("python", "bind", "python-blocking", "connect", "roundrobin", "at-least-once"),
 ]
 
+# WebSocket sub-transport (PROTOCOL.md §10). One trusted WS client — the "ws"
+# agent (agents/ws_agent.py, built on the `websockets` package) — validates each
+# language's bind end; we never test WS lang-to-lang (the raw matrix already
+# proves the aiomsg layers interoperate). For each language whose bind adapter
+# has landed, two directions are exercised: bind→WS push (WS sink) and WS→bind
+# with DATA_REQ/ACK across the adapter (WS source, at-least-once).
+#
+# Extend WS_LANGUAGES as each port lands its §10 adapter (WEBSOCKET-PLAN.md
+# phase 3). Phase 2 ships the python reference only.
+WS_LANGUAGES = [
+    "python",
+    "python-blocking",
+    "javascript",
+    "go",
+    "rust",
+    "rust-sync",
+    "c",
+    "cpp-sync",
+    "cpp-async",
+    "java",
+    "csharp",
+    "lua",
+    "zig",
+]
+
+
+def _connect_agent_scenarios(languages, agent):
+    """Two directions per bind language `L`, with a connect-only WebSocket
+    `agent` ("ws" trusted client, or "browser" package shim) on the other end."""
+    scenarios = []
+    for lang in languages:
+        scenarios.append((lang, "bind", agent, "connect", "publish", "at-most-once"))
+        scenarios.append((agent, "connect", lang, "bind", "roundrobin", "at-least-once"))
+    return scenarios
+
+
+# WS_SCENARIOS run over plain ws://, WSS_SCENARIOS the same set over wss:// (TLS
+# is terminated first, so the single-port sniff sees decrypted bytes — §1.3).
+WS_SCENARIOS = _connect_agent_scenarios(WS_LANGUAGES, "ws")
+WSS_SCENARIOS = _connect_agent_scenarios(WS_LANGUAGES, "ws")
+
+# The browser package (browser-lib) validated the same way, via a Node shim that
+# drives the real Socket over Node's global WebSocket (WEBSOCKET-PLAN.md §6.6).
+BROWSER_SCENARIOS = _connect_agent_scenarios(WS_LANGUAGES, "browser")
+BROWSER_TLS_SCENARIOS = _connect_agent_scenarios(WS_LANGUAGES, "browser")
+
 # Each parametrized case is (scenario tuple, tls flag).
-ALL_SCENARIOS = [(s, False) for s in SCENARIOS] + [(s, True) for s in TLS_SCENARIOS]
+ALL_SCENARIOS = (
+    [(s, False) for s in SCENARIOS]
+    + [(s, True) for s in TLS_SCENARIOS]
+    + [(s, False) for s in WS_SCENARIOS]
+    + [(s, True) for s in WSS_SCENARIOS]
+    + [(s, False) for s in BROWSER_SCENARIOS]
+    + [(s, True) for s in BROWSER_TLS_SCENARIOS]
+)
 
 
 def _scenario_id(case):
@@ -352,6 +408,27 @@ def lua_agent_cmd():
 
 
 @pytest.fixture(scope="session")
+def ws_agent_cmd():
+    """The trusted WebSocket client agent runs from source under the current
+    interpreter; it needs the `websockets` package (python-lib's `test` group).
+    It is self-contained (no aiomsg import), so no PYTHONPATH is required."""
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        pytest.skip("websockets not installed (install python-lib's test group)")
+    return [sys.executable, str(WS_AGENT)]
+
+
+@pytest.fixture(scope="session")
+def browser_agent_cmd():
+    """The browser package shim runs from source under Node, using Node's global
+    WebSocket (>= 22) as the polyfill — no build or dependency."""
+    if not _have("node"):
+        pytest.skip("node not available")
+    return ["node", str(BROWSER_AGENT)]
+
+
+@pytest.fixture(scope="session")
 def agents(
     rust_agent_exe,
     rust_sync_agent_exe,
@@ -364,6 +441,8 @@ def agents(
     node_agent_cmd,
     csharp_agent_exe,
     lua_agent_cmd,
+    ws_agent_cmd,
+    browser_agent_cmd,
 ):
     """Built native-agent invocations, keyed by SCENARIOS language strings.
 
@@ -384,6 +463,8 @@ def agents(
         "javascript": node_agent_cmd,
         "csharp": csharp_agent_exe,
         "lua": lua_agent_cmd,
+        "ws": ws_agent_cmd,
+        "browser": browser_agent_cmd,
     }
 
 
@@ -432,7 +513,13 @@ def _agent_cmd(lang, exes, *, role, behavior, port, send_mode, delivery, tls=Fal
     # A native agent is either a binary path (str) or a command prefix (list).
     invocation = exes[lang]
     prefix = invocation if isinstance(invocation, list) else [invocation]
-    return [*prefix, *flags], None
+    env = None
+    if lang == "browser" and tls:
+        # The browser package takes no CA (in a real browser, wss trust is the
+        # browser's own store); for the Node shim we make Node trust the shared
+        # self-signed test cert. This is the only browser-specific env.
+        env = {**os.environ, "NODE_EXTRA_CA_CERTS": str(TLS_CERT)}
+    return [*prefix, *flags], env
 
 
 def _python_env(lib_dir):
@@ -691,3 +778,97 @@ def test_connect_source_buffers_until_raw_peer_appears(agents, source_lang):
         f"{source_lang} connect source sent {received!r}, expected {expected!r}; "
         f"stderr:\n{err}"
     )
+
+
+WS_PEER_IDENTITY = b"ws-conformance!!"[:16]
+
+
+def _hello_with(identity):
+    return _raw_frame(bytes((T_HELLO, 0x01)) + identity)
+
+
+async def _async_read_frame(reader):
+    header = await reader.readexactly(4)
+    return await reader.readexactly(int.from_bytes(header, "big"))
+
+
+async def _async_collect_raw(reader, count):
+    got = []
+    while len(got) < count:
+        env = await _async_read_frame(reader)
+        if env and env[0] == T_DATA:
+            got.append(env[1:].decode())
+    return got
+
+
+async def _async_collect_ws(wsconn, count):
+    """Collect DATA payloads from a WebSocket peer, treating inbound binary
+    messages as one concatenated aiomsg byte stream (§10)."""
+    got = []
+    buf = bytearray()
+    while len(got) < count:
+        message = await wsconn.recv()
+        if isinstance(message, str):
+            continue
+        buf += message
+        while len(buf) >= 4:
+            size = int.from_bytes(buf[:4], "big")
+            if len(buf) < 4 + size:
+                break
+            env = bytes(buf[4 : 4 + size])
+            del buf[: 4 + size]
+            if env and env[0] == T_DATA:
+                got.append(env[1:].decode())
+    return got
+
+
+def test_same_port_ws_and_raw_peers_coexist():
+    """A single bind port serves a raw-TCP peer and a WebSocket peer at once.
+
+    Both connect simultaneously, the first-byte sniff routes each to the right
+    adapter, and one PUBLISH send reaches both (WEBSOCKET-PLAN.md §5.3). Runs
+    the bind end in-process (the reference python library) so both peers are
+    provably attached before the publish — the two peers use distinct identities
+    so neither is rejected as a duplicate.
+    """
+    pytest.importorskip("aiomsg")
+    websockets = pytest.importorskip("websockets")
+    from aiomsg import SendMode, Søcket
+
+    async def scenario():
+        port = _free_port()
+        sock = Søcket(send_mode=SendMode.PUBLISH)
+        await sock.bind("127.0.0.1", port)
+        raw_writer = wsconn = None
+        try:
+            raw_reader, raw_writer = await asyncio.open_connection("127.0.0.1", port)
+            raw_writer.write(_hello_with(RAW_IDENTITY))
+            await raw_writer.drain()
+            await _async_read_frame(raw_reader)  # consume the peer's HELLO
+
+            wsconn = await websockets.connect(f"ws://127.0.0.1:{port}", max_size=None)
+            await wsconn.send(_hello_with(WS_PEER_IDENTITY))
+
+            for _ in range(100):
+                if len(sock._connections) >= 2:
+                    break
+                await asyncio.sleep(0.05)
+            assert len(sock._connections) == 2, "both peers should be attached"
+
+            for i in range(COUNT):
+                await sock.send(f"{PREFIX}{i}".encode())
+
+            raw_got = await _async_collect_raw(raw_reader, COUNT)
+            ws_got = await _async_collect_ws(wsconn, COUNT)
+            return raw_got, ws_got
+        finally:
+            if wsconn is not None:
+                await wsconn.close()
+            if raw_writer is not None:
+                raw_writer.close()
+            await sock.close()
+
+    raw_got, ws_got = asyncio.run(scenario())
+    expected = [f"{PREFIX}{i}" for i in range(COUNT)]
+    assert raw_got == expected, f"raw peer got {raw_got!r}"
+    assert ws_got == expected, f"ws peer got {ws_got!r}"

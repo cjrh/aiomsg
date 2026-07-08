@@ -33,7 +33,15 @@ func (s *Socket) acceptLoop(ln net.Listener) {
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
-			s.handleConnection(c)
+			// Bind-side accept: sniff raw-vs-WebSocket (PROTOCOL.md §10) before
+			// running the ordinary connection handler. The connect end never
+			// receives WebSocket, so connectLoop calls handleConnection directly.
+			wrapped, err := sniffAndWrap(c)
+			if err != nil {
+				_ = c.Close()
+				return
+			}
+			s.handleConnection(wrapped)
 		}(conn)
 	}
 }

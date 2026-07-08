@@ -266,6 +266,16 @@ public final class Socket implements AutoCloseable {
             conn.in = sock.getInputStream();
             conn.out = sock.getOutputStream();
 
+            // Bind side only: sniff raw-vs-WebSocket (PROTOCOL.md §10) and, on an
+            // HTTP upgrade, replace the streams with the WS byte-stream adapter.
+            // The connect end never receives WebSocket, so it is left untouched.
+            if (isServer) {
+                Ws.Streams ws = Ws.sniff(conn.in, conn.out);
+                if (ws == null) return; // unknown first byte or rejected upgrade
+                conn.in = ws.in();
+                conn.out = ws.out();
+            }
+
             // Handshake: send our HELLO, read and validate the peer's.
             conn.out.write(Protocol.frameHello(id));
             conn.out.flush();

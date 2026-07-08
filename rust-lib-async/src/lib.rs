@@ -24,6 +24,7 @@
 mod broker;
 mod conn;
 pub mod protocol;
+mod ws;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};

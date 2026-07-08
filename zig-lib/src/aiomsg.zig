@@ -31,6 +31,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const net = std.Io.net;
 const proto = @import("protocol.zig");
+const ws = @import("ws.zig");
 
 const c = @cImport({
     @cInclude("errno.h");
@@ -122,6 +123,7 @@ const Conn = struct {
     sock: *Socket,
     fd: c_int,
     ssl: ?*c.SSL, // null for plain TCP
+    ws: ?*ws.Ws = null, // non-null once a WebSocket upgrade completes (§10)
     peer: Identity = std.mem.zeroes(Identity),
 
     out_mtx: Io.Mutex = .init,
@@ -577,34 +579,68 @@ fn setBlocking(fd: c_int) void {
 
 const ReadResult = enum { data, idle, closed };
 
-fn connRead(conn: *Conn, dec: *proto.Decoder, gpa: Allocator) ReadResult {
-    var buf: [16384]u8 = undefined;
+// Read once from the transport (TLS or plain TCP) into `buf`. Returns the number
+// of bytes read (>0), 0 on timeout/no data, or -1 on close or error.
+fn rawRead(conn: *Conn, buf: []u8) i64 {
     if (conn.ssl) |ssl| {
-        const r = c.SSL_read(ssl, &buf, buf.len);
-        if (r > 0) {
-            dec.push(gpa, buf[0..@intCast(r)]) catch return .closed;
-            return .data;
-        }
+        const r = c.SSL_read(ssl, buf.ptr, @intCast(buf.len));
+        if (r > 0) return r;
         const err = c.SSL_get_error(ssl, r);
-        if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) return .idle;
+        if (err == c.SSL_ERROR_WANT_READ or err == c.SSL_ERROR_WANT_WRITE) return 0;
         if (err == c.SSL_ERROR_SYSCALL) {
             const e = std.c._errno().*;
-            if (e == c.EAGAIN or e == c.EWOULDBLOCK or e == c.EINTR) return .idle;
+            if (e == c.EAGAIN or e == c.EWOULDBLOCK or e == c.EINTR) return 0;
         }
-        return .closed;
+        return -1;
     }
-    const n = c.recv(conn.fd, &buf, buf.len, 0);
-    if (n > 0) {
-        dec.push(gpa, buf[0..@intCast(n)]) catch return .closed;
-        return .data;
-    }
-    if (n == 0) return .closed;
+    const n = c.recv(conn.fd, buf.ptr, buf.len, 0);
+    if (n > 0) return @intCast(n);
+    if (n == 0) return -1;
     const e = std.c._errno().*;
-    if (e == c.EAGAIN or e == c.EWOULDBLOCK or e == c.EINTR) return .idle;
-    return .closed;
+    if (e == c.EAGAIN or e == c.EWOULDBLOCK or e == c.EINTR) return 0;
+    return -1;
 }
 
+// Flush any pending WebSocket control-frame bytes (pong / close) to the peer.
+fn wsFlushOut(conn: *Conn) bool {
+    const w = conn.ws.?;
+    if (w.out.items.len == 0) return true;
+    const ok = rawWriteAll(conn, w.out.items);
+    w.out.clearRetainingCapacity();
+    return ok;
+}
+
+// Read once. Returns `.data` if bytes were read (and any decoded frames pushed to
+// `dec`), `.idle` on timeout/no data, or `.closed` on close or error. Over a
+// WebSocket the raw bytes are run through the frame parser (§10) first.
+fn connRead(conn: *Conn, dec: *proto.Decoder, gpa: Allocator) ReadResult {
+    var buf: [16384]u8 = undefined;
+    const n = rawRead(conn, &buf);
+    if (n == 0) return .idle;
+    if (n < 0) return .closed;
+    const bytes = buf[0..@intCast(n)];
+    if (conn.ws) |w| {
+        const fr = ws.feed(w, gpa, bytes, dec) catch return .closed;
+        const flushed = wsFlushOut(conn);
+        if (!flushed or fr == .close) return .closed;
+        return .data;
+    }
+    dec.push(gpa, bytes) catch return .closed;
+    return .data;
+}
+
+// Write one framed aiomsg message. Over a WebSocket it becomes exactly one
+// unmasked binary frame (§2.2); otherwise it goes straight to the transport.
 fn connWriteAll(conn: *Conn, buf: []const u8) bool {
+    if (conn.ws) |_| {
+        const f = ws.encode(conn.sock.gpa, 0x2, buf) catch return false;
+        defer conn.sock.gpa.free(f);
+        return rawWriteAll(conn, f);
+    }
+    return rawWriteAll(conn, buf);
+}
+
+fn rawWriteAll(conn: *Conn, buf: []const u8) bool {
     var off: usize = 0;
     while (off < buf.len) {
         if (conn.ssl) |ssl| {
@@ -669,6 +705,71 @@ fn forwardFrames(self: *Socket, conn: *Conn, dec: *proto.Decoder) void {
     }
 }
 
+// Bind-side detection of raw aiomsg vs a WebSocket upgrade (PROTOCOL.md §10), run
+// after TLS termination on the decrypted stream. Returns 0 (raw — the sniffed
+// byte is replayed into the decoder), 1 (WebSocket upgraded — conn.ws is set), or
+// -1 (drop). Only the accept path sniffs; the connect end never does.
+fn serverSniff(conn: *Conn, dec: *proto.Decoder, gpa: Allocator) i32 {
+    const deadline = nowMs() + handshake_ms;
+    var first: [1]u8 = undefined;
+    while (true) {
+        const r = rawRead(conn, &first);
+        if (r > 0) break;
+        if (r < 0 or nowMs() >= deadline) return -1;
+    }
+    if (first[0] == 0x00) { // raw aiomsg: the HELLO length prefix begins 0x00
+        dec.push(gpa, first[0..1]) catch return -1;
+        return 0;
+    }
+    if (first[0] != 'G') return -1;
+
+    // Accumulate the HTTP request through the terminating blank line (cap ~8 KiB).
+    var req: [ws.max_request_bytes]u8 = undefined;
+    var rlen: usize = 1;
+    req[0] = 'G';
+    var term_end: ?usize = null;
+    while (term_end == null and rlen < req.len) {
+        var chunk: [2048]u8 = undefined;
+        const r = rawRead(conn, &chunk);
+        if (r < 0 or nowMs() >= deadline) return -1;
+        if (r == 0) continue;
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(r)) and rlen < req.len) : (i += 1) {
+            req[rlen] = chunk[i];
+            rlen += 1;
+        }
+        var k: usize = 3;
+        while (k < rlen) : (k += 1) {
+            if (req[k - 3] == '\r' and req[k - 2] == '\n' and req[k - 1] == '\r' and req[k] == '\n') {
+                term_end = k + 1;
+                break;
+            }
+        }
+    }
+    const end = term_end orelse {
+        _ = rawWriteAll(conn, "HTTP/1.1 400 Bad Request\r\n\r\n");
+        return -1;
+    };
+
+    var resp: []u8 = undefined;
+    const ok = ws.handshakeResponse(gpa, req[0..end], &resp) catch return -1;
+    _ = rawWriteAll(conn, resp);
+    gpa.free(resp);
+    if (!ok) return -1;
+
+    const w = gpa.create(ws.Ws) catch return -1;
+    w.* = .{};
+    conn.ws = w;
+
+    // Bytes read past the request are the first WS frames; feed them now.
+    const leftover = req[end..rlen];
+    if (leftover.len != 0) {
+        const fr = ws.feed(w, gpa, leftover, dec) catch return -1;
+        if (!wsFlushOut(conn) or fr == .close) return -1;
+    }
+    return 1;
+}
+
 fn runConnection(self: *Socket, fd: c_int, ctx: ?*c.SSL_CTX, is_server: bool, server_name: []const u8) void {
     const gpa = self.gpa;
     var conn = Conn{ .sock = self, .fd = fd, .ssl = null };
@@ -683,6 +784,18 @@ fn runConnection(self: *Socket, fd: c_int, ctx: ?*c.SSL_CTX, is_server: bool, se
 
     // Teardown: free transport, unregister (under lock) before freeing Conn.
     defer {
+        if (conn.ws) |w| {
+            // Best-effort WebSocket close (1000); do not wait for the echo.
+            if (!w.close_sent) {
+                if (ws.encode(gpa, 0x8, &.{ 0x03, 0xE8 })) |cf| {
+                    _ = rawWriteAll(&conn, cf);
+                    gpa.free(cf);
+                } else |_| {}
+            }
+            w.deinit(gpa);
+            gpa.destroy(w);
+            conn.ws = null;
+        }
         dec.deinit(gpa);
         if (conn.ssl) |ssl| c.SSL_free(ssl);
         self.removeFd(fd);
@@ -708,6 +821,10 @@ fn runConnection(self: *Socket, fd: c_int, ctx: ?*c.SSL_CTX, is_server: bool, se
             if (c.SSL_connect(ssl) != 1) return;
         }
     }
+
+    // Bind side only: sniff raw-vs-WebSocket on the (decrypted) stream before any
+    // aiomsg bytes (PROTOCOL.md §10). The connect end never sniffs.
+    if (is_server and serverSniff(&conn, &dec, gpa) < 0) return;
 
     // App handshake: send our HELLO, read and validate the peer's.
     const hello = proto.frameHello(gpa, &self.id) catch return;

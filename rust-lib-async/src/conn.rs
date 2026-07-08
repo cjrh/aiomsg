@@ -64,10 +64,10 @@ pub(crate) async fn accept_loop(
                     let sd = shutdown.clone();
                     tokio::spawn(async move {
                         let res = match acceptor {
-                            Acceptor::Plain => handle_connection(stream, cmd_tx, identity, sd).await,
+                            Acceptor::Plain => sniff_then_handle(stream, cmd_tx, identity, sd).await,
                             #[cfg(feature = "tls")]
                             Acceptor::Tls(a) => match a.accept(stream).await {
-                                Ok(tls) => handle_connection(tls, cmd_tx, identity, sd).await,
+                                Ok(tls) => sniff_then_handle(tls, cmd_tx, identity, sd).await,
                                 Err(e) => { debug!("TLS server handshake failed: {e}"); Ok(()) }
                             },
                         };
@@ -134,6 +134,24 @@ pub(crate) async fn connect_loop<A>(
             _ = shutdown.recv() => break,
             _ = tokio::time::sleep(wait) => {}
         }
+    }
+}
+
+/// Bind-side accept: sniff raw-vs-WebSocket (PROTOCOL.md §10) then run the
+/// ordinary connection handler over the resulting byte stream. The connect side
+/// never receives WebSocket, so it calls `handle_connection` directly.
+async fn sniff_then_handle<S>(
+    stream: S,
+    cmd_tx: mpsc::UnboundedSender<Command>,
+    identity: Identity,
+    shutdown: Shutdown,
+) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    match crate::ws::sniff_and_wrap(stream).await? {
+        Some(sniffed) => handle_connection(sniffed, cmd_tx, identity, shutdown).await,
+        None => Ok(()),
     }
 }
 

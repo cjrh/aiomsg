@@ -1,0 +1,17 @@
+{
+  "name": "aiomsg-browser",
+  "version": "1.0.0",
+  "description": "Browser aiomsg: a full connect-end Socket over WebSocket, wire-compatible with every aiomsg implementation.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "Apache-2.0"
+}

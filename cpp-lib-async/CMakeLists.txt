@@ -39,7 +39,7 @@ if(NOT ASIO_INCLUDE_DIR)
 endif()
 
 # --- the library ----------------------------------------------------------
-add_library(aiomsg STATIC src/protocol.cpp src/socket.cpp)
+add_library(aiomsg STATIC src/protocol.cpp src/socket.cpp src/ws.cpp)
 add_library(aiomsg::aiomsg ALIAS aiomsg)
 target_include_directories(aiomsg PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -77,6 +77,11 @@ if(AIOMSG_BUILD_TESTS)
     target_compile_definitions(test_integration PRIVATE
         CERT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../conformance/certs")
     add_test(NAME test_integration COMMAND test_integration)
+
+    add_executable(test_ws tests/test_ws.cpp src/ws.cpp)
+    target_link_libraries(test_ws PRIVATE OpenSSL::Crypto)
+    target_include_directories(test_ws PRIVATE src)
+    add_test(NAME test_ws COMMAND test_ws)
 endif()
 
 # --- install + packaging ---------------------------------------------------

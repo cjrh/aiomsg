@@ -247,6 +247,27 @@ public sealed class Socket : IAsyncDisposable
                 await ssl.AuthenticateAsClientAsync(clientTls, _cts.Token).ConfigureAwait(false);
                 stream = ssl;
             }
+
+            // Bind side only: sniff raw-vs-WebSocket on the (decrypted) stream and
+            // wrap in the WS adapter on an HTTP upgrade (PROTOCOL.md §10). The
+            // connect end never receives WebSocket, so it skips this.
+            if (isServer)
+            {
+                using var sniffCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                sniffCts.CancelAfter(HandshakeMs);
+                Stream? adapted;
+                try
+                {
+                    adapted = await Ws.SniffAsync(stream, sniffCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return; // silent/slow client held the accept slot too long
+                }
+                if (adapted is null)
+                    return; // unknown first byte or rejected upgrade
+                stream = adapted;
+            }
             conn.Stream = stream;
 
             // Handshake: send our HELLO directly (the writer task is not running

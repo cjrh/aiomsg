@@ -23,6 +23,7 @@ on:
       - 'javascript-lib/**'
       - 'csharp-lib/**'
       - 'lua-lib/**'
+      - 'browser-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
   pull_request:
@@ -42,6 +43,7 @@ on:
       - 'javascript-lib/**'
       - 'csharp-lib/**'
       - 'lua-lib/**'
+      - 'browser-lib/**'
       - 'conformance/**'
       - '.github/workflows/conformance.yml'
 
@@ -75,6 +77,13 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+      # Node >= 22 for the browser-lib conformance shim, which drives the
+      # browser Socket via Node's built-in global WebSocket (added in 22). The
+      # trusted `ws` agent needs no Node; it uses the `websockets` PyPI package
+      # pulled in by python-lib's `test` group.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true

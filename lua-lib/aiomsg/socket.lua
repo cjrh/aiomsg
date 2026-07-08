@@ -19,6 +19,7 @@
 local socket = require("socket")
 local protocol = require("aiomsg.protocol")
 local tls = require("aiomsg.tls")
+local ws = require("aiomsg.ws")
 
 local now = socket.gettime
 
@@ -204,6 +205,12 @@ local function find_conn(self, identity)
 end
 
 local function queue_frame(conn, framed)
+  -- On a WebSocket connection every aiomsg frame goes out as one unmasked
+  -- binary WebSocket message (PROTOCOL.md §10). Control bytes (the HTTP
+  -- response, pongs, close frames) are appended to outbuf directly instead.
+  if conn.ws then
+    framed = ws.encode(ws.OP_BINARY, framed)
+  end
   conn.outbuf = conn.outbuf .. framed
   conn.last_send = now() -- any real frame resets the heartbeat interval
 end
@@ -330,9 +337,26 @@ function Socket:_accept(server, tls_params)
     conn.sock:settimeout(0)
     conn.state = "tls"
   else
-    conn.state = "open"
-    queue_frame(conn, protocol.frame_hello(self.id)) -- our half of the handshake
+    self:_begin_server_stream(conn)
   end
+end
+
+-- Server side: the accepted connection is now a readable byte stream (post-TLS
+-- if any). Defer our HELLO until the first byte reveals raw aiomsg vs a
+-- WebSocket upgrade (PROTOCOL.md §10 single-port detection).
+function Socket:_begin_server_stream(conn)
+  conn.state = "open"
+  conn.await_sniff = true
+  conn.sniff_buf = ""
+  conn.deadline = now() + HANDSHAKE_TIMEOUT
+end
+
+-- Connection is active as raw aiomsg (client side, or a decided raw peer): send
+-- our half of the symmetric handshake.
+function Socket:_open_and_hello(conn)
+  conn.state = "open"
+  conn.deadline = now() + HANDSHAKE_TIMEOUT
+  queue_frame(conn, protocol.frame_hello(self.id))
 end
 
 -- A client TCP connect has completed (socket is writable): verify it, then
@@ -349,9 +373,7 @@ function Socket:_connected(conn)
     conn.state = "tls"
     conn.deadline = now() + HANDSHAKE_TIMEOUT
   else
-    conn.state = "open"
-    conn.deadline = now() + HANDSHAKE_TIMEOUT
-    queue_frame(conn, protocol.frame_hello(self.id))
+    self:_open_and_hello(conn) -- connect end never sniffs
   end
 end
 
@@ -359,9 +381,11 @@ end
 function Socket:_tls_step(conn)
   local ok, err = conn.sock:dohandshake()
   if ok then
-    conn.state = "open"
-    conn.deadline = now() + HANDSHAKE_TIMEOUT
-    queue_frame(conn, protocol.frame_hello(self.id))
+    if conn.is_server then
+      self:_begin_server_stream(conn) -- sniff raw vs WebSocket on decrypted bytes
+    else
+      self:_open_and_hello(conn)
+    end
   elseif err ~= "wantread" and err ~= "wantwrite" and err ~= "timeout" then
     self:_drop(conn) -- handshake failed
   end
@@ -389,28 +413,121 @@ end
 
 function Socket:_on_readable(conn)
   local data, peer_closed = read_available(conn.sock)
+  if conn.close_after_flush then
+    -- Awaiting flush of a rejection / close frame; ignore further input.
+    if peer_closed then
+      self:_drop(conn)
+    end
+    return
+  end
   if #data > 0 then
     conn.last_recv = now()
-    conn.decoder:push(data)
-    while true do
-      local envelope = conn.decoder:pop()
-      if not envelope then
-        break
-      end
-      local parsed = protocol.parse_envelope(envelope)
-      if parsed then
-        if not conn.handshaked then
-          if not self:_complete_handshake(conn, parsed) then
-            return
+    -- Turn raw socket bytes into the aiomsg byte stream. A server connection is
+    -- first sniffed (raw vs WebSocket); an established WebSocket connection is
+    -- run through its frame parser; a raw connection passes the bytes straight
+    -- through.
+    local stream
+    if conn.await_sniff then
+      stream = self:_sniff(conn, data)
+    elseif conn.ws then
+      stream = self:_ws_ingest(conn, data)
+    else
+      stream = data
+    end
+    if conn.dropped then
+      return
+    end
+    if stream and #stream > 0 then
+      conn.decoder:push(stream)
+      while true do
+        local envelope = conn.decoder:pop()
+        if not envelope then
+          break
+        end
+        local parsed = protocol.parse_envelope(envelope)
+        if parsed then
+          if not conn.handshaked then
+            if not self:_complete_handshake(conn, parsed) then
+              return
+            end
+          elseif parsed.type ~= protocol.TYPE.HEARTBEAT then
+            self:_received(conn.peer, parsed)
           end
-        elseif parsed.type ~= protocol.TYPE.HEARTBEAT then
-          self:_received(conn.peer, parsed)
         end
       end
     end
   end
+  -- Flush bytes queued while handling this read — most importantly our deferred
+  -- HELLO, sent only once the sniff decides raw-vs-WebSocket. The writable phase
+  -- of select() runs *before* the readable phase, so without this a peer that
+  -- pipelines its whole stream in one write (and a sink that stops on count)
+  -- would never see our HELLO. The synchronous ports write it inline after the
+  -- sniff; this gives the async port the same promptness.
+  if not conn.dropped and #conn.outbuf > 0 then
+    self:_on_writable(conn)
+  end
   if peer_closed then
     self:_drop(conn)
+  end
+end
+
+-- Feed inbound WebSocket bytes to the connection's parser: append any control
+-- output (pongs, close) to the write buffer, arrange teardown after flushing if
+-- the peer closed or violated the protocol, and return the decoded aiomsg bytes.
+function Socket:_ws_ingest(conn, raw)
+  if conn.close_after_flush then
+    return ""
+  end
+  local payload, control, closed = ws.ingest(conn.ws, raw)
+  if #control > 0 then
+    conn.outbuf = conn.outbuf .. control
+  end
+  if closed then
+    conn.close_after_flush = true
+  end
+  return payload
+end
+
+-- First-byte detection on a freshly readable server connection (PROTOCOL.md
+-- §10). Returns the aiomsg byte stream to decode (possibly ""), having sent our
+-- HELLO once the transport is decided; returns "" while still awaiting the rest
+-- of an HTTP request, or after arranging a rejection.
+function Socket:_sniff(conn, data)
+  conn.sniff_buf = conn.sniff_buf .. data
+  local first = string.byte(conn.sniff_buf, 1)
+  if first == 0x00 then
+    -- Raw aiomsg: the sniffed bytes are the start of the peer's frames.
+    conn.await_sniff = false
+    local buffered = conn.sniff_buf
+    conn.sniff_buf = nil
+    queue_frame(conn, protocol.frame_hello(self.id))
+    return buffered
+  elseif first == 0x47 then -- 'G' — an HTTP GET, i.e. a WebSocket upgrade
+    local term = conn.sniff_buf:find("\r\n\r\n", 1, true)
+    if not term then
+      if #conn.sniff_buf > ws.MAX_REQUEST_BYTES then
+        conn.outbuf = conn.outbuf .. ws.error_response("400 Bad Request")
+        conn.close_after_flush = true
+      end
+      return "" -- await the rest of the request
+    end
+    local request = conn.sniff_buf:sub(1, term + 3)
+    local leftover = conn.sniff_buf:sub(term + 4)
+    conn.sniff_buf = nil
+    conn.await_sniff = false
+    local key, status = ws.parse_upgrade(request)
+    if not key then
+      conn.outbuf = conn.outbuf .. ws.error_response(status)
+      conn.close_after_flush = true
+      return ""
+    end
+    conn.outbuf = conn.outbuf .. ws.success_response(key)
+    conn.ws = ws.new_parser()
+    queue_frame(conn, protocol.frame_hello(self.id)) -- WS-encoded now
+    return self:_ws_ingest(conn, leftover) -- leftover bytes are the first WS frames
+  else
+    self:_drop(conn)
+    return ""
   end
 end
 
@@ -437,12 +554,17 @@ end
 -- the next writable event.
 function Socket:_on_writable(conn)
   if #conn.outbuf == 0 then
+    if conn.close_after_flush then
+      self:_drop(conn) -- rejection / close frame has been flushed
+    end
     return
   end
   local i, err, last = conn.sock:send(conn.outbuf)
   local sent = i or last or 0
   conn.outbuf = string.sub(conn.outbuf, sent + 1)
   if err == "closed" then
+    self:_drop(conn)
+  elseif #conn.outbuf == 0 and conn.close_after_flush then
     self:_drop(conn)
   end
 end

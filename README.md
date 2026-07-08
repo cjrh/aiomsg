@@ -15,6 +15,8 @@ Smart sockets for simple network communication.
 - Built-in heartbeating
 - Built-in reliability options (at-most-once, at-least-once)
 - Optional TLS, native to each language (no OpenSSL/C toolchain in Rust)
+- WebSocket sub-transport on bind ends, so browsers join as ordinary peers
+  (see [WebSocket transport](#websocket-transport-browser-clients))
 
 # Implementations
 
@@ -1477,6 +1479,76 @@ root key. This process is described in
 by Moshe Zadka
 
 Hope that helps!
+
+# WebSocket transport (browser clients)
+
+aiomsg speaks its ordinary length-prefixed protocol (see
+[PROTOCOL.md](PROTOCOL.md)) over a **WebSocket** sub-transport, so a browser can
+participate as a full aiomsg peer. This is a thin byte-stream adapter — exactly
+parallel to TLS — layered *below* the protocol: HELLO, identity dedup,
+heartbeats, DATA/DATA_REQ/ACK, send modes and delivery guarantees are all
+unchanged (PROTOCOL.md §10).
+
+## What works
+
+- **Every language's `bind` end accepts WebSocket on the same port as raw TCP.**
+  There is nothing to configure. On each accepted connection the server peeks
+  one byte: `0x00` is a raw aiomsg peer (every aiomsg stream starts with the
+  `HELLO` length prefix), and `G` (the start of `GET … HTTP/1.1`) triggers the
+  RFC 6455 upgrade. A raw-TCP peer, a TLS peer, and a browser can all be
+  connected to one bind socket at once.
+- **The language libraries do not gain a WebSocket *client*.** The only
+  WebSocket connect-end aiomsg ships is the **browser package**
+  (`browser-lib/`, npm `aiomsg-browser`): a full aiomsg connect-end `Socket`
+  that happens to use a `WebSocket` internally. It mirrors the JavaScript
+  library's `Socket` API one-to-one, minus `bind()` (browsers cannot listen).
+  Multi-connect fan-out, publish / round-robin / by-identity routing,
+  at-most-once and at-least-once delivery, identity dedup, heartbeats,
+  buffering and reconnect all behave exactly as the reference libraries.
+
+```js
+import { Socket, SendMode } from "aiomsg-browser";
+
+const sock = new Socket({ sendMode: SendMode.ROUND_ROBIN });
+sock.connect("example.com", 25000, { tls: true }); // wss://example.com:25000
+sock.send(new TextEncoder().encode("hello from the browser"));
+for await (const msg of sock.messages()) console.log(new TextDecoder().decode(msg));
+```
+
+## `wss://` is required on `https` pages
+
+A browser served over `https` may only open `wss://` (secure) WebSockets. Point
+the browser package at a **TLS** bind socket and pass `{ tls: true }` to
+`connect()`. Because TLS is terminated first, the single-port byte sniff runs on
+the decrypted stream, so one TLS bind socket serves raw-TLS aiomsg peers and
+`wss://` browsers together — again, no extra configuration. The browser trusts
+the server certificate via its own store and the page origin (the browser
+package cannot be handed a custom CA).
+
+## Authentication is your job
+
+The WebSocket upgrade handler **ignores `Origin`, `Cookie`, and any
+subprotocol** — aiomsg validates TLS and nothing else, on every transport.
+WebSocket brings no authentication with it, and neither does aiomsg. If you need
+to authenticate a peer, do it at the application layer on top of the delivered
+payloads. The simplest pattern is a **token as the first message**: the browser
+sends a JWT (or session token) as its first `send()`, and the bind end validates
+it before treating the peer as trusted, dropping the connection otherwise.
+
+```js
+// browser: authenticate before doing anything else
+sock.connect("example.com", 25000, { tls: true });
+sock.send(new TextEncoder().encode(myJwt)); // first message = credential
+```
+
+```python
+# bind end: the first message from a peer must be a valid token
+identity, first = await sock.recv_identity()
+if not verify_jwt(first):
+    ...  # reject / ignore this peer at the application layer
+```
+
+Do not assume the WebSocket handshake authenticated anything — it did not.
 
 # FAQ
 

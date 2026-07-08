@@ -119,6 +119,8 @@ agents:
     javascript|javascript-lib/conformance_agent.js
     csharp|csharp-lib/ConformanceAgent/bin/Release/net9.0/conformance_agent
     lua|lua-lib/conformance_agent.lua
+    ws|conformance/agents/ws_agent.py
+    browser|browser-lib/conformance_agent.js
     EOF
     exit "$rc"
 
