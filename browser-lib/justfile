@@ -1,0 +1,21 @@
+# aiomsg (browser JavaScript) — build & test
+#
+# The browser transport is exercised under Node's WebSocket-compatible test
+# runner; the conformance suite runs `node conformance_agent.js ...`.
+
+# Show available recipes.
+default:
+    @just --list
+
+# Run the test suite (protocol unit tests + WebSocket transport tests).
+test:
+    node --test
+
+# Run tests with V8 coverage (LCOV output for coverage services).
+coverage:
+    node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-exclude='test/**/*.js' --test-reporter=lcov > coverage.lcov
+    python3 ../tools/coverage/normalize_lcov_paths.py coverage.lcov coverage.lcov
+
+# Run the conformance agent, e.g.: just agent --role connect --port 25000 ...
+agent *ARGS:
+    node conformance_agent.js {{ARGS}}

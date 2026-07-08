@@ -28,11 +28,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: extractions/setup-just@v4
       - name: Format check
         run: cargo fmt --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Clippy (no default features, TLS off)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
-      - name: Test
-        run: cargo test
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: rust-lib-async/coverage.lcov
+          flag-name: rust-async

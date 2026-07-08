@@ -6,9 +6,13 @@ build:
 test:
     zig build test
 
+# Run tests with kcov line coverage (LCOV output for coverage services).
+coverage:
+    ../tools/coverage/zig_kcov_lcov.sh . coverage.lcov
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example *args:
     zig build run-{{example}} {{ if args == "" { "" } else { "-- " + args } }}
 
 clean:
-    rm -rf .zig-cache zig-out
+    rm -rf .zig-cache zig-out build-coverage coverage.lcov

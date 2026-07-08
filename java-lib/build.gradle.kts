@@ -6,6 +6,7 @@
 //     ./gradlew runServer    // examples (also runClient, runTls)
 plugins {
     application
+    jacoco
 }
 
 repositories {
@@ -35,6 +36,23 @@ tasks.test {
     // Where the integration test finds the shared TLS certificates.
     systemProperty("aiomsg.certDir", "$projectDir/../conformance/certs")
     testLogging { events("passed", "failed", "skipped") }
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        csv.required = false
+        html.required = false
+    }
+    classDirectories.setFrom(
+        files(classDirectories.files.map {
+            fileTree(it) {
+                exclude("aiomsg/ConformanceAgent*")
+                exclude("aiomsg/examples/**")
+            }
+        })
+    )
 }
 
 // Runnable examples, mirroring `cargo run --example` / `go run ./examples/...`.

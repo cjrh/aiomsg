@@ -7,6 +7,7 @@ on:
     paths:
       - 'csharp-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/csharp.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - 'csharp-lib/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/csharp.yml'
 
 defaults:
@@ -32,7 +34,12 @@ jobs:
         with:
           dotnet-version: '9.0.x'
       - uses: extractions/setup-just@v4
-      # `just test` runs `dotnet test`: protocol unit tests + the in-process
-      # TCP/TLS integration test.
-      - name: Test
-        run: just test
+      # `just coverage` runs `dotnet test` under dotnet-coverage and converts
+      # the Cobertura report to LCOV.
+      - name: Test with coverage
+        run: just coverage
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: csharp-lib/coverage.lcov
+          flag-name: csharp

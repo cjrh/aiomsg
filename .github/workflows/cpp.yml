@@ -8,6 +8,7 @@ on:
       - 'cpp-lib-sync/**'
       - 'cpp-lib-async/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/cpp.yml'
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
       - 'cpp-lib-sync/**'
       - 'cpp-lib-async/**'
       - 'conformance/certs/**'
+      - 'tools/coverage/**'
       - '.github/workflows/cpp.yml'
 
 jobs:
@@ -31,9 +33,25 @@ jobs:
         dir: [cpp-lib-sync, cpp-lib-async]
     steps:
       - uses: actions/checkout@v7
-      - name: Install OpenSSL headers
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: Install coverage/build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libssl-dev
       - uses: extractions/setup-just@v4
-      - name: Test
-        run: just test
+      - name: Test with coverage
+        run: just coverage
         working-directory: ${{ matrix.dir }}
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: ${{ matrix.dir }}/coverage.lcov
+          flag-name: ${{ matrix.dir }}
+          parallel: true
+
+  finish-coverage:
+    name: Finalize Coveralls
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: coverallsapp/github-action@v2
+        with:
+          parallel-finished: true

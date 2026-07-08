@@ -7,6 +7,10 @@ build:
 test: build
     ctest --test-dir build --output-on-failure
 
+# Run tests with Clang source coverage (LCOV output for coverage services).
+coverage:
+    ../tools/coverage/cmake_llvm_lcov.sh . cxx coverage.lcov src/protocol.cpp src/socket.cpp src/ws.cpp
+
 # Build and run the two-process demo (server in the background, then client).
 examples: build
     ./build/server & echo $! > /tmp/aiomsg-cppsync-server.pid
@@ -21,4 +25,4 @@ install prefix="dist":
     cmake --install build
 
 clean:
-    rm -rf build dist
+    rm -rf build build-coverage dist coverage.lcov
