@@ -25,7 +25,9 @@ defaults:
 jobs:
   test:
     name: Build & test (zig build test)
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 runners do not publish a kcov package; keep this job on
+    # 22.04 until Zig coverage no longer depends on distro kcov.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -40,7 +42,17 @@ jobs:
       # writes LCOV for the protocol unit tests + TCP/TLS integration test.
       - name: Test with coverage
         run: just coverage
+      - name: Check coverage report
+        id: coverage
+        run: |
+          if awk -F: '/^LF:/ { total += $2 } END { exit !(total > 0) }' coverage.lcov; then
+            echo "has-coverage=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Zig coverage report is empty; skipping Coveralls upload"
+            echo "has-coverage=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload coverage to Coveralls
+        if: steps.coverage.outputs.has-coverage == 'true'
         uses: coverallsapp/github-action@v2
         with:
           file: zig-lib/coverage.lcov
