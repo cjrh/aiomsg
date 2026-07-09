@@ -122,6 +122,11 @@ coverage-csharp:
 coverage-lua:
     cd lua-lib && just coverage
 
+# Bump package versions, create a vX.Y.Z tag, and push the commit + tag.
+# bump may be: major, minor, patch, or an exact x.y.z version.
+release bump:
+    node tools/release.mjs {{bump}}
+
 # Syntax-check GitHub Actions workflows without adding PyYAML to any project env.
 lint-ci:
     #!/usr/bin/env bash

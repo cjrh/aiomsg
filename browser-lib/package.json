@@ -2,17 +2,39 @@
   "name": "aiomsg-browser",
   "version": "1.0.0",
   "description": "Browser aiomsg: a full connect-end Socket over WebSocket, wire-compatible with every aiomsg implementation.",
+  "keywords": [
+    "aiomsg",
+    "websocket",
+    "browser",
+    "messaging"
+  ],
   "type": "module",
   "main": "src/index.js",
+  "browser": "src/index.js",
   "exports": {
     ".": "./src/index.js"
   },
+  "files": [
+    "src"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "test": "node --test",
     "coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-exclude='test/**/*.js' --test-reporter=lcov > coverage.lcov"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cjrh/aiomsg.git",
+    "directory": "browser-lib"
+  },
+  "bugs": {
+    "url": "https://github.com/cjrh/aiomsg/issues"
+  },
+  "homepage": "https://github.com/cjrh/aiomsg/tree/master/browser-lib#readme",
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0"
 }
