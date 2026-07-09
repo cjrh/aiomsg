@@ -25,7 +25,9 @@ defaults:
 jobs:
   test:
     name: Build & test (zig build test)
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 runners do not publish a kcov package; keep this job on
+    # 22.04 until Zig coverage no longer depends on distro kcov.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
