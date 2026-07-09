@@ -40,10 +40,27 @@ EOF
 kcov --include-path="$project_dir/src" "$kcov_dir/protocol" "$build_dir/protocol_test"
 kcov --include-path="$project_dir/src" "$kcov_dir/aiomsg" "$build_dir/aiomsg_test"
 
+kcov_cobertura_xml() {
+  local dir=$1
+  local name
+  for name in cobertura.xml cov.xml coverage.xml; do
+    if [[ -f "$dir/$name" ]]; then
+      printf '%s\n' "$dir/$name"
+      return 0
+    fi
+  done
+  echo "error: kcov did not write a Cobertura XML file in $dir" >&2
+  ls -la "$dir" >&2 || true
+  return 1
+}
+
+protocol_xml=$(kcov_cobertura_xml "$kcov_dir/protocol")
+aiomsg_xml=$(kcov_cobertura_xml "$kcov_dir/aiomsg")
+
 python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
-  "$kcov_dir/protocol/coverage.xml" "$build_dir/protocol.lcov" src --repo-root "$repo_root"
+  "$protocol_xml" "$build_dir/protocol.lcov" src --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
-  "$kcov_dir/aiomsg/coverage.xml" "$build_dir/aiomsg.lcov" src --repo-root "$repo_root"
+  "$aiomsg_xml" "$build_dir/aiomsg.lcov" src --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/merge_lcov.py" "$output" \
   "$build_dir/protocol.lcov" "$build_dir/aiomsg.lcov"
 
