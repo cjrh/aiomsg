@@ -43,14 +43,32 @@ kcov --include-path="$project_dir/src" "$kcov_dir/aiomsg" "$build_dir/aiomsg_tes
 kcov_cobertura_xml() {
   local dir=$1
   local name
+  local candidate
+
+  # Newer kcov releases write XML directly under the requested output
+  # directory. Ubuntu 22.04's kcov writes per-binary output under a hashed
+  # child directory and leaves only a friendly symlink at the top level.
   for name in cobertura.xml cov.xml coverage.xml; do
     if [[ -f "$dir/$name" ]]; then
       printf '%s\n' "$dir/$name"
       return 0
     fi
+    while IFS= read -r candidate; do
+      printf '%s\n' "$candidate"
+      return 0
+    done < <(find "$dir" -type f -name "$name" ! -path '*/kcov-merged/*' -print)
   done
+
+  # Fall back to kcov's merged directory if a distro version only writes that.
+  for name in cobertura.xml cov.xml coverage.xml; do
+    while IFS= read -r candidate; do
+      printf '%s\n' "$candidate"
+      return 0
+    done < <(find "$dir" -type f -name "$name" -print)
+  done
+
   echo "error: kcov did not write a Cobertura XML file in $dir" >&2
-  ls -la "$dir" >&2 || true
+  find "$dir" -maxdepth 3 -type f -o -type l >&2 || true
   return 1
 }
 
