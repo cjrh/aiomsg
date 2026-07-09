@@ -76,9 +76,9 @@ protocol_xml=$(kcov_cobertura_xml "$kcov_dir/protocol")
 aiomsg_xml=$(kcov_cobertura_xml "$kcov_dir/aiomsg")
 
 python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
-  "$protocol_xml" "$build_dir/protocol.lcov" src --repo-root "$repo_root"
+  "$protocol_xml" "$build_dir/protocol.lcov" "$project_dir/src" --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
-  "$aiomsg_xml" "$build_dir/aiomsg.lcov" src --repo-root "$repo_root"
+  "$aiomsg_xml" "$build_dir/aiomsg.lcov" "$project_dir/src" --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/merge_lcov.py" "$output" \
   "$build_dir/protocol.lcov" "$build_dir/aiomsg.lcov"
 
