@@ -1,69 +1,51 @@
 # Releasing aiomsg
 
-This repo uses one semver tag (`vX.Y.Z`) for a coherent repo release. Package manifests that need registry publishing are bumped to the same version before the tag is created.
-
-Currently versioned and published:
-
-- `browser-lib/package.json` → npm package `aiomsg-browser`
-
-## One-time npm setup
-
-The first npm publish may need to be done manually so the package exists on npm:
-
-```sh
-cd browser-lib
-npm publish --access public
-```
-
-After the package exists, configure npm trusted publishing for `aiomsg-browser`:
-
-- npm user/package owner: `cjrh`
-- Provider: GitHub Actions
-- GitHub owner/repository: `cjrh` / `aiomsg`
-- Workflow filename: `release.yml`
-- Environment name: `npm`
-- Allowed action: `npm publish`
-
-The `release.yml` workflow uses GitHub OIDC (`id-token: write`) and `npm publish --provenance --access public`; no `NPM_TOKEN` secret is needed for normal releases after trusted publishing is configured.
+aiomsg has one coherent release version: every version-bearing implementation is
+set to `X.Y.Z`, and the release commit receives the annotated tag `vX.Y.Z`.
+Each implementation owns the mechanics for updating its native metadata; the
+root `justfile` owns testing, the one commit, and the tags.
 
 ## Normal release
 
-From a clean tracked working tree:
+Release only from a clean, current `master` checkout:
 
 ```sh
-just release patch
-just release minor
-just release major
+just release 2026.7.1
 ```
 
-The release command:
+The command:
 
-1. verifies all versioned package manifests currently agree;
-2. computes the next semver version;
-3. checks that the `vX.Y.Z` tag does not exist locally or on `origin`;
-4. runs the browser package tests;
-5. bumps `browser-lib/package.json`;
-6. checks `npm pack --dry-run`;
-7. commits the version bump;
-8. creates an annotated `vX.Y.Z` tag;
-9. atomically pushes the branch and tag to `origin`.
+1. checks that `master` is clean and matches `origin/master`;
+2. invokes `set-release-version` in each implementation;
+3. runs all implementation tests and checks the browser npm package contents;
+4. commits any pending version changes as `Release v2026.7.1`;
+5. creates annotated `v2026.7.1` and `golang-lib/v2026.7.1` tags; and
+6. atomically pushes `master` and both tags.
 
-Pushing the tag starts `.github/workflows/release.yml`, which verifies that the tag matches `browser-lib/package.json`, reruns tests, skips publishing if that exact package version is already on npm, and otherwise publishes `aiomsg-browser`.
+The Go module needs its directory-prefixed tag for `go get`; it points at the
+same commit as the repository release tag. LuaRocks records the same release as
+`2026.7.1-1`, where `-1` is the rock revision. Go has no version field in
+`go.mod`; its tag is its version.
 
-## Exact-version tagging
+If the final push is rejected, no remote ref has changed because it is atomic.
+The local release commit and tags remain for inspection; after resolving the
+rejection, either push them explicitly or reset them before trying again.
 
-`just release <x.y.z>` is also supported. This is useful for tagging an already-published current version without creating a new version commit:
+## Published packages
 
-```sh
-just release 1.0.0
-```
+Pushing `vX.Y.Z` runs `.github/workflows/release.yml`. The workflow verifies
+that the tag matches both publishable manifests, then publishes:
 
-Exact versions must be equal to or newer than the current package version.
+- `python-lib` package `aiomsg` to PyPI;
+- `browser-lib` package `aiomsg-browser` to npm.
 
-## Adding future published packages
+Other implementations still receive matching build/package metadata, but are
+not published by this workflow yet.
 
-When another implementation gains registry publishing:
+## One-time registry setup
 
-1. add its manifest path to `VERSIONED_FILES` in `tools/release.mjs`;
-2. add its publish job to `.github/workflows/release.yml`;
-3. document any one-time registry/trusted-publisher setup here.
+PyPI uses its existing `pypi` GitHub environment and trusted publisher. For
+npm, create the `npm` GitHub environment and configure npm trusted publishing
+for `aiomsg-browser` with owner `cjrh`, repository `aiomsg`, workflow
+`release.yml`, and environment `npm`. The npm job uses OIDC and provenance, so
+no long-lived npm token is required.

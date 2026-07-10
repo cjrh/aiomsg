@@ -135,8 +135,9 @@ aiomsg = { package = "aiomsg-sync", path = "vendor/aiomsg/rust-lib-sync" }
 go get github.com/cjrh/aiomsg/golang-lib@<git-ref>
 ```
 
-Commit SHAs and branches work directly. If you use semantic release tags for the
-Go module, tag them with the subdirectory prefix, such as `golang-lib/v1.0.0`.
+Commit SHAs and branches work directly. Repository releases create a matching
+subdirectory tag for this module, such as `golang-lib/v2026.7.1`; use that tag
+when you need a versioned Go dependency.
 
 Then import it in Go code:
 
@@ -279,13 +280,13 @@ Equivalent `.csproj` entry:
 LuaRocks can install the rockspec from this repository at a pinned revision:
 
 ```sh
-luarocks install https://raw.githubusercontent.com/cjrh/aiomsg/<git-ref>/lua-lib/aiomsg-1.0-1.rockspec
+luarocks install https://raw.githubusercontent.com/cjrh/aiomsg/<git-ref>/lua-lib/aiomsg-2026.7.1-1.rockspec
 ```
 
 For a local checkout or submodule:
 
 ```sh
-luarocks make vendor/aiomsg/lua-lib/aiomsg-1.0-1.rockspec
+luarocks make vendor/aiomsg/lua-lib/aiomsg-2026.7.1-1.rockspec
 ```
 
 The code examples throughout this document are in Python (the reference), but
@@ -1639,10 +1640,9 @@ The Python reference implementation uses [uv](https://docs.astral.sh/uv/) and
     $ just test     # run the test suite
     $ just lint     # ruff check
 
-Releasing the Python package is documented in `python-lib/RELEASING.md`;
-in short, `just release patch` (from `python-lib/`) bumps the version,
-tags, and pushes, and a pushed `v*` tag triggers PyPI publishing via GitHub
-Actions.
+Releases are repository-wide: `just release X.Y.Z` (from the repository root)
+aligns every implementation's version metadata, tests the repository, tags, and
+pushes. A pushed `v*` tag triggers PyPI and npm publishing; see `RELEASING.md`.
 
 See each implementation's own `README` for language-specific developer
 instructions.

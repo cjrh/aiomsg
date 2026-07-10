@@ -17,6 +17,13 @@ coverage:
     node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-exclude='test/**/*.js' --test-reporter=lcov > coverage.lcov
     python3 ../tools/coverage/normalize_lcov_paths.py coverage.lcov coverage.lcov
 
+# Set this package's release version. Repository commit/tag policy lives at the root.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    [[ "$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")" == "{{version}}" ]] || npm version "{{version}}" --no-git-tag-version
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example:
     node examples/{{example}}.js

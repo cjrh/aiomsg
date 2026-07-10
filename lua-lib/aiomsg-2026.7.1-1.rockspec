@@ -1,5 +1,5 @@
 package = "aiomsg"
-version = "1.0-1"
+version = "2026.7.1-1"
 source = {
   url = "git+https://github.com/cjrh/aiomsg.git",
   dir = "aiomsg/lua-lib",

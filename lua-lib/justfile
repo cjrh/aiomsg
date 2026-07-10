@@ -19,6 +19,18 @@ test:
 coverage:
     python3 ../tools/coverage/lua_line_coverage.py coverage.lcov test/protocol_test.lua test/integration_test.lua
 
+# Set the LuaRocks package version; `-1` is the rock revision, not release semver.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    rockspec="aiomsg-{{version}}-1.rockspec"
+    current="$(find . -maxdepth 1 -type f -name 'aiomsg-*.rockspec' -printf '%f\n' | head -n 1)"
+    [[ -n "$current" ]]
+    sed -i -E 's/^version = "[^"]+"$/version = "{{version}}-1"/' "$current"
+    [[ "$current" == "$rockspec" ]] || mv "$current" "$rockspec"
+    sed -i -E "s/aiomsg-[0-9]+(\\.[0-9]+)*-[0-9]+\\.rockspec/$rockspec/g" README.md ../README.md
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example:
     lua examples/{{example}}.lua

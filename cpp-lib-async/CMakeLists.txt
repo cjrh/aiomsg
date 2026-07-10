@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(aiomsg_cpp_async
-    VERSION 1.0.0
+    VERSION 2026.7.1
     DESCRIPTION "Native C++ (Asio coroutines) implementation of the aiomsg protocol"
     LANGUAGES CXX)
 

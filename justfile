@@ -122,10 +122,40 @@ coverage-csharp:
 coverage-lua:
     cd lua-lib && just coverage
 
-# Bump package versions, create a vX.Y.Z tag, and push the commit + tag.
-# bump may be: major, minor, patch, or an exact x.y.z version.
-release bump:
-    node tools/release.mjs {{bump}}
+# Set every package's release metadata to an exact stable version.
+# Individual package recipes own their native manifest/lockfile updates.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    for package in browser-lib javascript-lib python-lib python-lib-blocking rust-lib-async rust-lib-sync c-lib cpp-lib-sync cpp-lib-async zig-lib lua-lib java-lib csharp-lib golang-lib; do
+        (cd "$package" && just set-release-version "{{version}}")
+    done
+
+# Test, version, commit, tag, and atomically push one coherent repository release.
+# Releases must start from an entirely clean, current local master branch.
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="{{version}}"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    [[ -z "$(git status --porcelain)" ]] || { echo "release: working tree is not clean" >&2; exit 1; }
+    [[ "$(git branch --show-current)" == "master" ]] || { echo "release: releases must start from master" >&2; exit 1; }
+    git fetch --tags origin master
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || { echo "release: local master is not current with origin/master" >&2; exit 1; }
+    ! git rev-parse --verify --quiet "refs/tags/v$version" >/dev/null || { echo "release: v$version already exists" >&2; exit 1; }
+    ! git rev-parse --verify --quiet "refs/tags/golang-lib/v$version" >/dev/null || { echo "release: golang-lib/v$version already exists" >&2; exit 1; }
+    just set-release-version "$version"
+    just test-all
+    (cd browser-lib && npm pack --dry-run)
+    git diff --check
+    if ! git diff --quiet; then
+        git add -A
+        git commit -m "Release v$version"
+    fi
+    git tag -a "v$version" -m "aiomsg $version"
+    git tag -a "golang-lib/v$version" -m "aiomsg Go module $version"
+    git push --atomic origin HEAD:refs/heads/master "refs/tags/v$version" "refs/tags/golang-lib/v$version"
 
 # Syntax-check GitHub Actions workflows without adding PyYAML to any project env.
 lint-ci:

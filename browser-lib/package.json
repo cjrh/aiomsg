@@ -1,6 +1,6 @@
 {
   "name": "aiomsg-browser",
-  "version": "1.0.0",
+  "version": "2026.7.1",
   "description": "Browser aiomsg: a full connect-end Socket over WebSocket, wire-compatible with every aiomsg implementation.",
   "keywords": [
     "aiomsg",

@@ -9,6 +9,9 @@ plugins {
     jacoco
 }
 
+// Kept in sync with the repository release tag by `just release`.
+version = "2026.7.1"
+
 repositories {
     mavenCentral()
 }

@@ -30,3 +30,9 @@ fmt-check:
 # Auto-format.
 fmt:
     gofmt -w .
+
+# Go module versions are defined by the `golang-lib/vX.Y.Z` tag, created by the root release.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]

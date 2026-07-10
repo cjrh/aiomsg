@@ -24,3 +24,10 @@ lint:
 # Auto-format with ruff.
 fmt:
     uv run --group lint ruff format aiomsg_blocking tests
+
+# Set this package's release version and lockfile. Repository commit/tag policy lives at the root.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    uv version --no-sync "{{version}}"
