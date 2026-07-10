@@ -15,6 +15,13 @@ coverage:
     ./gradlew test jacocoTestReport
     python3 ../tools/coverage/jacoco_to_lcov.py build/reports/jacoco/test/jacocoTestReport.xml coverage.lcov src/main/java src/main/java/aiomsg
 
+# Set the Gradle project version. Repository commit/tag policy lives at the root.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    sed -i -E 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"$/version = "{{version}}"/' build.gradle.kts
+
 # Run an example: `just run Server`, `just run Client`, or `just run Tls`.
 run example:
     ./gradlew run{{example}}

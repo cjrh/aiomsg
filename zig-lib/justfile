@@ -10,6 +10,13 @@ test:
 coverage:
     ../tools/coverage/zig_kcov_lcov.sh . coverage.lcov
 
+# Set the Zig package version. Repository commit/tag policy lives at the root.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    sed -i -E 's/\.version = "[0-9]+\.[0-9]+\.[0-9]+"/.version = "{{version}}"/' build.zig.zon
+
 # Run an example: `just run server`, `just run client`, or `just run tls`.
 run example *args:
     zig build run-{{example}} {{ if args == "" { "" } else { "-- " + args } }}

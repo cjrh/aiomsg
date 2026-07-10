@@ -4,37 +4,93 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build distributions
+  build-python:
+    name: Build aiomsg distributions
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-lib
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "v$(uv version --short)" = "$GITHUB_REF_NAME"
       - name: Build sdist and wheel
         run: uv build
-        working-directory: python-lib
       - uses: actions/upload-artifact@v7
         with:
-          name: dist
+          name: python-dist
           path: python-lib/dist/
 
-  publish:
-    name: Publish to PyPI
-    needs: build
+  publish-pypi:
+    name: Publish aiomsg to PyPI
+    needs: build-python
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     environment: pypi
     permissions:
       id-token: write
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: dist
+          name: python-dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-npm-browser:
+    name: Publish aiomsg-browser to npm
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: browser-lib
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Verify tag matches package version
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_name="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).name")"
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          if [[ "$package_version" != "$tag_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match $package_name@$package_version" >&2
+            exit 1
+          fi
+          echo "name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "version=$package_version" >> "$GITHUB_OUTPUT"
+      - name: Test
+        run: npm test
+      - name: Check whether this version is already published
+        id: published
+        shell: bash
+        run: |
+          set -euo pipefail
+          if output="$(npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version 2>&1)"; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "$output"
+          elif grep -qE 'E404|404 Not Found' <<<"$output"; then
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$output" >&2
+            exit 1
+          fi
+      - name: Publish
+        if: steps.published.outputs.already != 'true'
+        run: npm publish --provenance --access public

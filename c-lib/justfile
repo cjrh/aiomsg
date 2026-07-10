@@ -11,6 +11,13 @@ test: build
 coverage:
     ../tools/coverage/cmake_llvm_lcov.sh . c coverage.lcov src/protocol.c src/aiomsg.c src/ws.c
 
+# Set the CMake project version. Repository commit/tag policy lives at the root.
+set-release-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    sed -i -E 's/(VERSION )[0-9]+\.[0-9]+\.[0-9]+/\1{{version}}/' CMakeLists.txt
+
 # Build and run the two-process demo (server in the background, then client).
 examples: build
     ./build/server & echo $! > /tmp/aiomsg-c-server.pid

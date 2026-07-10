@@ -1,6 +1,6 @@
 [package]
 name = "aiomsg"
-version = "0.1.0"
+version = "2026.7.1"
 edition = "2021"
 rust-version = "1.75"
 description = "Native async (tokio) implementation of the aiomsg smart-socket protocol"

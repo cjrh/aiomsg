@@ -1,6 +1,6 @@
 .{
     .name = .aiomsg,
-    .version = "1.0.0",
+    .version = "2026.7.1",
     .minimum_zig_version = "0.16.0",
     // Files shipped when this package is fetched as a dependency.
     .paths = .{

@@ -107,7 +107,7 @@ lua test/protocol_test.lua      # the same, directly
 lua test/integration_test.lua
 ```
 
-A [rockspec](aiomsg-1.0-1.rockspec) is included for packaging, and a
+A [rockspec](aiomsg-2026.7.1-1.rockspec) is included for packaging, and a
 [just](https://github.com/casey/just) file wraps the common tasks.
 
 ## Status
