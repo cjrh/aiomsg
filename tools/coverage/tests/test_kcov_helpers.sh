@@ -27,11 +27,12 @@ touch "$work/merged/kcov-merged/coverage.xml"
 assert_eq "$(kcov_cobertura_xml "$work/merged")" "$work/merged/kcov-merged/coverage.xml"
 
 printf 'TN:\nSF:src/example.zig\nDA:1,1\nLH:1\nLF:1\nend_of_record\n' > "$work/nonempty.lcov"
-require_lcov_lines "$work/nonempty.lcov"
+[[ -z "$(warn_empty_lcov "$work/nonempty.lcov" 2>&1)" ]]
 printf 'TN:\nLH:0\nLF:0\nend_of_record\n' > "$work/empty.lcov"
-if require_lcov_lines "$work/empty.lcov"; then
-  echo "empty LCOV unexpectedly passed" >&2
+warning=$(warn_empty_lcov "$work/empty.lcov" 2>&1)
+[[ "$warning" == *"LCOV report has no source lines"* ]] || {
+  echo "empty LCOV did not produce the expected warning" >&2
   exit 1
-fi
+}
 
 echo "kcov helper fixtures passed"

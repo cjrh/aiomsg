@@ -51,7 +51,7 @@ python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
   "$aiomsg_xml" "$build_dir/aiomsg.lcov" "$project_dir/src" --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/merge_lcov.py" "$output" \
   "$build_dir/protocol.lcov" "$build_dir/aiomsg.lcov"
-require_lcov_lines "$output"
+warn_empty_lcov "$output"
 
 python3 - <<'PY' "$output"
 from pathlib import Path

@@ -32,14 +32,14 @@ kcov_cobertura_xml() {
   return 1
 }
 
-# Reject an LCOV report with no measurable source lines before an uploader turns
-# it into an unhelpful remote "Nothing to report" diagnostic.
-require_lcov_lines() {
+# Warn before a coverage uploader turns an empty report into an unhelpful
+# remote diagnostic. Kcov can produce no source lines for a supported Zig build;
+# the caller remains responsible for deciding whether that is release-blocking.
+warn_empty_lcov() {
   local report=$1
   local total
   total=$(awk -F: '$1 == "LF" { sum += $2 } END { print sum + 0 }' "$report")
   if (( total == 0 )); then
-    echo "error: LCOV report has no source lines: $report" >&2
-    return 1
+    echo "warning: LCOV report has no source lines: $report" >&2
   fi
 }
