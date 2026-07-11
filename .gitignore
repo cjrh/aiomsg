@@ -47,6 +47,7 @@ coverage.lcov
 coverage.out
 coverage.cobertura.xml
 build-coverage/
+.benchmarks/
 *.profraw
 *.profdata
 *.cover

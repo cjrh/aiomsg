@@ -58,6 +58,14 @@ test-csharp:
 test-lua:
     cd lua-lib && just test
 
+# Verify the Lua suite under its Lua 5.1-compatible parser/runtime boundary.
+test-lua-compat:
+    cd lua-lib && just test-lua-compat
+
+# Verify the synchronous Rust crate without its optional TLS feature.
+check-rust-sync-no-tls:
+    cd rust-lib-sync && just check-no-tls
+
 # Run the browser JavaScript implementation's test suite.
 test-browser:
     cd browser-lib && just test
@@ -65,6 +73,16 @@ test-browser:
 # Run the cross-language conformance (interop) suite.
 test-conformance:
     uv run --project python-lib --group test pytest conformance/ -v
+
+# Run only WebSocket conformance scenarios across native implementations.
+test-ws:
+    uv run --project python-lib --group test pytest conformance/test_interop.py -q -k "ws"
+
+# Test repository-owned release and coverage support tooling.
+test-tools:
+    python3 -m unittest discover -s tools/coverage/tests -p 'test_*.py'
+    bash tools/coverage/tests/test_kcov_helpers.sh
+    python3 tools/release_inventory.py check
 
 # Run the Python implementation's coverage suite.
 coverage-python:
@@ -123,14 +141,19 @@ coverage-lua:
     cd lua-lib && just coverage
 
 # Set every package's release metadata to an exact stable version.
-# Individual package recipes own their native manifest/lockfile updates.
+# The authoritative package inventory lives in tools/release_inventory.py;
+# individual package recipes own their native manifest/lockfile updates.
 set-release-version version:
     #!/usr/bin/env bash
     set -euo pipefail
     [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-    for package in browser-lib javascript-lib python-lib python-lib-blocking rust-lib-async rust-lib-sync c-lib cpp-lib-sync cpp-lib-async zig-lib lua-lib java-lib csharp-lib golang-lib; do
+    while IFS= read -r package; do
         (cd "$package" && just set-release-version "{{version}}")
-    done
+    done < <(python3 tools/release_inventory.py paths)
+
+# Validate release metadata without changing the checkout or publishing.
+check-release-metadata version:
+    python3 tools/release_inventory.py check "{{version}}"
 
 # Test, version, commit, tag, and atomically push one coherent repository release.
 # Releases must start from an entirely clean, current local master branch.
@@ -146,7 +169,9 @@ release version:
     ! git rev-parse --verify --quiet "refs/tags/v$version" >/dev/null || { echo "release: v$version already exists" >&2; exit 1; }
     ! git rev-parse --verify --quiet "refs/tags/golang-lib/v$version" >/dev/null || { echo "release: golang-lib/v$version already exists" >&2; exit 1; }
     just set-release-version "$version"
+    just check-release-metadata "$version"
     just test-all
+    just test-tools
     (cd browser-lib && npm pack --dry-run)
     git diff --check
     if ! git diff --quiet; then

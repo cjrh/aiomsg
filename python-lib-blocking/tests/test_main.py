@@ -170,6 +170,22 @@ def test_reconnect_after_binder_restart():
             assert server2.recv(timeout=RECV_TIMEOUT) == b"two"
 
 
+def test_close_flushes_messages_already_queued_for_a_connected_peer():
+    """close() must route its FIFO backlog before closing peer writers."""
+    source = Søcket().bind("127.0.0.1", 0)
+    peer = Søcket().connect("127.0.0.1", source.bound_port)
+    expected = [f"before-close-{i}".encode() for i in range(16)]
+    try:
+        assert source.at_least_one_connection.wait(timeout=RECV_TIMEOUT)
+        for message in expected:
+            source.send(message)
+        source.close()
+        assert [peer.recv(timeout=RECV_TIMEOUT) for _ in expected] == expected
+    finally:
+        source.close()
+        peer.close()
+
+
 def test_close_is_idempotent_and_fast():
     sock = Søcket().bind("127.0.0.1", 0)
     t0 = time.monotonic()

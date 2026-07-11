@@ -15,6 +15,18 @@ test:
     lua test/protocol_test.lua
     lua test/integration_test.lua
 
+# Parse every implementation file and run protocol tests under LuaJIT's Lua
+# 5.1-compatible language level. CI's LuaRocks-managed `lua` may resolve to
+# Lua 5.1 even when Lua 5.4 is also installed, so this catches unsupported
+# syntax without requiring LuaSocket/LuaSec to be installed for LuaJIT locally.
+test-lua-compat:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for file in aiomsg/*.lua; do
+        LUA_FILE="$file" luajit -e 'assert(loadfile(os.getenv("LUA_FILE")))'
+    done
+    luajit test/protocol_test.lua
+
 # Run tests with debug-hook line coverage (LCOV output for coverage services).
 coverage:
     python3 ../tools/coverage/lua_line_coverage.py coverage.lcov test/protocol_test.lua test/integration_test.lua

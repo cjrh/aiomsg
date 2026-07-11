@@ -343,7 +343,9 @@ end
 
 -- Server side: the accepted connection is now a readable byte stream (post-TLS
 -- if any). Defer our HELLO until the first byte reveals raw aiomsg vs a
--- WebSocket upgrade (PROTOCOL.md §10 single-port detection).
+-- WebSocket upgrade (PROTOCOL.md §10 single-port detection). _on_readable()
+-- flushes that queued HELLO before returning, so a peer that pipelines its
+-- stream and then closes still observes the symmetric handshake.
 function Socket:_begin_server_stream(conn)
   conn.state = "open"
   conn.await_sniff = true
@@ -668,6 +670,8 @@ function Socket:_step(timeout)
     end
   else
     local readable, writable = socket.select(readers, writers, timeout)
+    -- Writable sockets are serviced first. _on_readable() therefore flushes
+    -- output it queues itself instead of waiting for the next reactor turn.
     for _, sock in ipairs(writable) do
       local conn = conn_by_sock[sock]
       if conn and not conn.dropped then

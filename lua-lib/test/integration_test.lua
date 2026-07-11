@@ -6,6 +6,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local socket = require("socket")
 local aiomsg = require("aiomsg")
+local protocol = require("aiomsg.protocol")
 
 local function check(name, condition)
   if not condition then
@@ -75,6 +76,31 @@ do
   sink:connect("127.0.0.1", port)
   check("bind-side source buffering", same(collect(source, sink, 3), { "b0", "b1", "b2" }))
   source:close()
+  sink:close()
+end
+
+-- A raw peer can pipeline HELLO and DATA in one TCP write. The bind end must
+-- flush its deferred HELLO before returning from the readable phase, otherwise a
+-- peer that stops after its payload never receives the symmetric handshake.
+do
+  local port = free_port()
+  local sink = aiomsg.Socket.new()
+  local peer = assert(socket.tcp())
+  sink:bind("127.0.0.1", port)
+  peer:settimeout(1)
+  assert(peer:connect("127.0.0.1", port))
+  local identity = string.rep("p", protocol.IDENTITY_SIZE)
+  assert(peer:send(protocol.frame_hello(identity) .. protocol.frame_data("pipelined")))
+  sink:poll(0.1) -- accept the raw TCP peer
+  sink:poll(0.1) -- read its pipelined HELLO + DATA and flush our HELLO
+
+  local reply = assert(peer:receive(#protocol.frame_hello(identity)))
+  local decoder = protocol.Decoder.new()
+  decoder:push(reply)
+  local hello = protocol.parse_envelope(assert(decoder:pop()))
+  check("pipelined peer receives bind HELLO", hello.type == protocol.TYPE.HELLO)
+  check("pipelined data reaches bind socket", sink:recv(1) == "pipelined")
+  peer:close()
   sink:close()
 end
 
