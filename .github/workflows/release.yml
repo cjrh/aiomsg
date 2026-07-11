@@ -1,3 +1,6 @@
+# Owns trusted publication for PyPI package aiomsg and npm package aiomsg-browser.
+# Do not replace either job when adding another registry; extend the release
+# inventory and preserve each package's independent manifest verification.
 name: Release
 
 on:

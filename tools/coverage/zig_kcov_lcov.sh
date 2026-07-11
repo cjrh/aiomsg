@@ -14,6 +14,8 @@ print(pathlib.Path(sys.argv[1]).resolve())
 PY
 )
 repo_root=$(cd "$project_dir/.." && pwd)
+# shellcheck source=kcov_helpers.sh
+source "$repo_root/tools/coverage/kcov_helpers.sh"
 build_dir="$project_dir/build-coverage"
 kcov_dir="$build_dir/kcov"
 
@@ -40,38 +42,6 @@ EOF
 kcov --include-path="$project_dir/src" "$kcov_dir/protocol" "$build_dir/protocol_test"
 kcov --include-path="$project_dir/src" "$kcov_dir/aiomsg" "$build_dir/aiomsg_test"
 
-kcov_cobertura_xml() {
-  local dir=$1
-  local name
-  local candidate
-
-  # Newer kcov releases write XML directly under the requested output
-  # directory. Ubuntu 22.04's kcov writes per-binary output under a hashed
-  # child directory and leaves only a friendly symlink at the top level.
-  for name in cobertura.xml cov.xml coverage.xml; do
-    if [[ -f "$dir/$name" ]]; then
-      printf '%s\n' "$dir/$name"
-      return 0
-    fi
-    while IFS= read -r candidate; do
-      printf '%s\n' "$candidate"
-      return 0
-    done < <(find "$dir" -type f -name "$name" ! -path '*/kcov-merged/*' -print)
-  done
-
-  # Fall back to kcov's merged directory if a distro version only writes that.
-  for name in cobertura.xml cov.xml coverage.xml; do
-    while IFS= read -r candidate; do
-      printf '%s\n' "$candidate"
-      return 0
-    done < <(find "$dir" -type f -name "$name" -print)
-  done
-
-  echo "error: kcov did not write a Cobertura XML file in $dir" >&2
-  find "$dir" -maxdepth 3 -type f -o -type l >&2 || true
-  return 1
-}
-
 protocol_xml=$(kcov_cobertura_xml "$kcov_dir/protocol")
 aiomsg_xml=$(kcov_cobertura_xml "$kcov_dir/aiomsg")
 
@@ -81,6 +51,7 @@ python3 "$repo_root/tools/coverage/cobertura_to_lcov.py" \
   "$aiomsg_xml" "$build_dir/aiomsg.lcov" "$project_dir/src" --repo-root "$repo_root"
 python3 "$repo_root/tools/coverage/merge_lcov.py" "$output" \
   "$build_dir/protocol.lcov" "$build_dir/aiomsg.lcov"
+require_lcov_lines "$output"
 
 python3 - <<'PY' "$output"
 from pathlib import Path

@@ -21,6 +21,11 @@ build:
 lint:
     cargo clippy --all-targets -- -D warnings
 
+# Verify the feature-minimal build: WebSocket support still requires Read + Write
+# even when the optional TLS implementation is absent.
+check-no-tls:
+    cargo clippy --no-default-features --all-targets -- -D warnings
+
 # Check formatting.
 fmt-check:
     cargo fmt --check
