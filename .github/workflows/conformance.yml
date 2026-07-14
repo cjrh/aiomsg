@@ -81,7 +81,7 @@ jobs:
       # browser Socket via Node's built-in global WebSocket (added in 22). The
       # trusted `ws` agent needs no Node; it uses the `websockets` PyPI package
       # pulled in by python-lib's `test` group.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - uses: astral-sh/setup-uv@v7
