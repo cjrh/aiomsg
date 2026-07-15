@@ -31,7 +31,7 @@ jobs:
         dir: [javascript-lib, browser-lib]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
       - uses: extractions/setup-just@v4
