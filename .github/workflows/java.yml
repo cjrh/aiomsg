@@ -9,6 +9,7 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/java.yml'
+      - '.github/workflows/coveralls-finish.yml'
   pull_request:
     branches:
       - master
@@ -17,6 +18,8 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/java.yml'
+      - '.github/workflows/coveralls-finish.yml'
+  workflow_dispatch:
 
 defaults:
   run:
@@ -44,3 +47,10 @@ jobs:
         with:
           file: java-lib/coverage.lcov
           flag-name: java
+          parallel: true
+
+  finish-coverage:
+    name: Finalize Coveralls
+    needs: test
+    if: always()
+    uses: ./.github/workflows/coveralls-finish.yml

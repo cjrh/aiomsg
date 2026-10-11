@@ -8,6 +8,7 @@ on:
       - 'golang-lib/**'
       - 'tools/coverage/**'
       - '.github/workflows/golang.yml'
+      - '.github/workflows/coveralls-finish.yml'
   pull_request:
     branches:
       - master
@@ -15,6 +16,8 @@ on:
       - 'golang-lib/**'
       - 'tools/coverage/**'
       - '.github/workflows/golang.yml'
+      - '.github/workflows/coveralls-finish.yml'
+  workflow_dispatch:
 
 defaults:
   run:
@@ -42,3 +45,10 @@ jobs:
         with:
           file: golang-lib/coverage.lcov
           flag-name: go
+          parallel: true
+
+  finish-coverage:
+    name: Finalize Coveralls
+    needs: test
+    if: always()
+    uses: ./.github/workflows/coveralls-finish.yml

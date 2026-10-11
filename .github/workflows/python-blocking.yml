@@ -7,12 +7,15 @@ on:
     paths:
       - 'python-lib-blocking/**'
       - '.github/workflows/python-blocking.yml'
+      - '.github/workflows/coveralls-finish.yml'
   pull_request:
     branches:
       - master
     paths:
       - 'python-lib-blocking/**'
       - '.github/workflows/python-blocking.yml'
+      - '.github/workflows/coveralls-finish.yml'
+  workflow_dispatch:
 
 defaults:
   run:
@@ -66,9 +69,5 @@ jobs:
   finish-coverage:
     name: Finalize Coveralls
     needs: build
-    runs-on: ubuntu-latest
     if: always()
-    steps:
-      - uses: coverallsapp/github-action@v2
-        with:
-          parallel-finished: true
+    uses: ./.github/workflows/coveralls-finish.yml

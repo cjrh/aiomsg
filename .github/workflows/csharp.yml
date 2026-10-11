@@ -9,6 +9,7 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/csharp.yml'
+      - '.github/workflows/coveralls-finish.yml'
   pull_request:
     branches:
       - master
@@ -17,6 +18,8 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/csharp.yml'
+      - '.github/workflows/coveralls-finish.yml'
+  workflow_dispatch:
 
 defaults:
   run:
@@ -43,3 +46,10 @@ jobs:
         with:
           file: csharp-lib/coverage.lcov
           flag-name: csharp
+          parallel: true
+
+  finish-coverage:
+    name: Finalize Coveralls
+    needs: test
+    if: always()
+    uses: ./.github/workflows/coveralls-finish.yml
