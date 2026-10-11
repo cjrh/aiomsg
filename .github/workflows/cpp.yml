@@ -10,6 +10,7 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/cpp.yml'
+      - '.github/workflows/coveralls-finish.yml'
   pull_request:
     branches:
       - master
@@ -19,6 +20,8 @@ on:
       - 'conformance/certs/**'
       - 'tools/coverage/**'
       - '.github/workflows/cpp.yml'
+      - '.github/workflows/coveralls-finish.yml'
+  workflow_dispatch:
 
 jobs:
   test:
@@ -49,9 +52,5 @@ jobs:
   finish-coverage:
     name: Finalize Coveralls
     needs: test
-    runs-on: ubuntu-latest
     if: always()
-    steps:
-      - uses: coverallsapp/github-action@v2
-        with:
-          parallel-finished: true
+    uses: ./.github/workflows/coveralls-finish.yml

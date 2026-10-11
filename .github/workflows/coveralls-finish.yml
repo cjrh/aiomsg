@@ -1,0 +1,18 @@
+name: Coveralls finish
+
+on:
+  workflow_call:
+
+jobs:
+  finish:
+    name: Finalize Coveralls
+    runs-on: ubuntu-latest
+    steps:
+      # Each language workflow has `paths:` filters, so a Coveralls build holds
+      # only the flags of the workflow that ran. Carrying forward every flag
+      # makes each build total all languages. Adding or removing a language
+      # means editing this list.
+      - uses: coverallsapp/github-action@v2
+        with:
+          parallel-finished: true
+          carryforward: "c,cpp-lib-sync,cpp-lib-async,csharp,go,javascript-lib,browser-lib,java,lua,py-3.11,py-3.12,py-3.13,py-3.14,py-blocking-3.11,py-blocking-3.12,py-blocking-3.13,py-blocking-3.14,py-blocking-3.14t,rust-async,rust-sync,zig"
